@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>테크킹 운동회</title>
+<link rel="icon" href="techking.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap" id="app">
+  <section id="joinView" class="hero" hidden>
+    <div class="hero-duo"><img src="techking.png" alt="테크킹"><span class="vs">VS</span><img src="dannyssam.png" alt="대니쌤"></div>
+    <h1>테크킹<br><span>운동회</span></h1>
+    <p>친구들과 테크킹팀·대니쌤팀으로 겨뤄요</p>
+    <form id="joinForm" class="box" autocomplete="off">
+      <input id="nameInput" class="field-input" maxlength="10" placeholder="내 이름 (10자까지)" aria-label="내 이름" required>
+      <button class="btn" type="submit">참가하기</button>
+      <p class="error" id="joinError" role="alert"></p>
+    </form>
+  </section>
+  <section id="playView" hidden></section>
+</main>
+<script src="common.js"></script>
+<script src="games.js"></script>
+<script src="player.js"></script>
+</body>
+</html>
