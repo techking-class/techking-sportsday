@@ -4,7 +4,7 @@
  * ctx = { tap(종류), act(종류, 데이터) }
  */
 function createGameView(ev, ctx) {
-  const make = { tug: tugGame, land: landGame, relay: relayGame, zone: zoneGame, nunchi: nunchiGame }[ev];
+  const make = { tug: tugGame, land: landGame, relay: relayGame, zone: zoneGame, nunchi: nunchiGame, flip: flipGame, meteor: meteorGame, rps: rpsGame }[ev];
   return make(ctx);
 }
 
@@ -386,6 +386,319 @@ function nunchiGame(ctx) {
         btn.textContent = me.done ? '외쳤어!' : brk ? '준비…' : `${N.k}!`;
         tk.who(me.team);
         tk.say(me.done ? '외쳤다! 이번 라운드는 친구들을 지켜보자.' : TIPS.nunchi);
+      }
+    },
+  };
+}
+
+/* ⑥ 판뒤집기 */
+function flipGame(ctx) {
+  const grid = h('div', { class: 'flip-grid' });
+  const count = h('div', { class: 'flip-count' });
+  let n = 0, discs = [], lastS = null, lastMe = null, lastPick = 0;
+  function build(size) {
+    n = size;
+    grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+    discs = [];
+    for (let i = 0; i < n * n; i++) {
+      const d = h('button', { class: 'disc', type: 'button', 'aria-label': `${i + 1}번 판` }, h('span', { class: 'disc-in' }));
+      if (ctx) {
+        d.addEventListener('pointerdown', e => {
+          e.preventDefault();
+          if (!lastS || lastS.phase !== 'playing' || !lastMe) return;
+          const own = lastMe.team === 'red' ? 'r' : 'b';
+          if (d.dataset.c === own) return;
+          const t = Date.now();
+          if (t - lastPick < (lastMe.coolMs || 300)) return;
+          lastPick = t;
+          setDisc(d, own); // 바로 뒤집어 보여주고, 서버가 확정해요
+          if (navigator.vibrate) navigator.vibrate(8);
+          ctx.act('cell', { i });
+        });
+      } else d.tabIndex = -1;
+      discs.push(d);
+    }
+    grid.replaceChildren(...discs);
+  }
+  function setDisc(d, c) {
+    if (d.dataset.c === c) return;
+    const first = !d.dataset.c;
+    d.dataset.c = c;
+    d.className = 'disc ' + c + (first ? '' : ' flipping');
+    if (!first) setTimeout(() => d.classList.remove('flipping'), 260);
+  }
+  const tk = ctx ? techking(TIPS.flip) : null;
+  return {
+    root: h('div', {}, count, grid, tk && tk.root),
+    update(s, me) {
+      lastS = s; lastMe = me;
+      const F = s.flip;
+      if (F.n !== n) build(F.n);
+      for (let i = 0; i < n * n; i++) setDisc(discs[i], F.cells[i]);
+      setOnce(count, F.count.red + ':' + F.count.blue + teamsStamp, () => [teamTag('red', `${F.count.red}장`), teamTag('blue', `${F.count.blue}장`)]);
+      if (tk && me) tk.who(me.team);
+    },
+  };
+}
+
+/* ⑦ 운석 피하기 — 우주 공간 가로·세로 평면 */
+function meteorGame(ctx) {
+  const Eng = (typeof TechkingEngine !== 'undefined') ? TechkingEngine : null;
+  const wrap = h('div', { class: 'meteor-wrap' + (ctx ? ' playable' : '') });
+  const cv = h('canvas', { class: 'meteor-cv', role: 'img', 'aria-label': ctx ? '우주 공간. 드래그하거나 방향키로 움직여요' : '운석 피하기 경기장' });
+  const banner = h('div', { class: 'meteor-banner', hidden: '' });
+  wrap.append(cv, banner);
+  const scoreBox = h('div', { class: 'meteor-score' });
+  const tk = ctx ? techking(TIPS.meteor) : null;
+  const g = cv.getContext('2d');
+
+  let W = 100, H = 70, PR = 2.4, RR = 7;
+  let meteors = [], seed = null, goAt = 0, offset = -Infinity, lastS = null, lastMe = null, roster = [];
+  const others = new Map();         // 친구들 화면 위치 (부드럽게 따라가기)
+  const imgs = {};
+  let myX = 50, myY = 35, tgtX = 50, tgtY = 35, placed = false, hitAt = 0, shieldLocal = 0, lastSent = 0, sentX = -1, sentY = -1;
+  const keys = new Set();
+  const stars = Array.from({ length: 90 }, (_, i) => ({ x: (i * 37.7) % 100, y: (i * 53.3) % 70, r: (i % 3) * 0.12 + 0.12, p: i }));
+
+  function img(team) {
+    const src = MASCOT[team];
+    if (!imgs[team] || imgs[team].src !== new URL(src, location.href).href) { const im = new Image(); im.src = src; imgs[team] = im; }
+    return imgs[team];
+  }
+  function serverNow() { return Date.now() + (isFinite(offset) ? offset : 0); }
+
+  // 드래그: 손가락이 움직인 만큼 내 우주선이 움직여요 (손가락이 캐릭터를 가리지 않게)
+  let drag = null;
+  if (ctx) {
+    wrap.addEventListener('pointerdown', e => { e.preventDefault(); drag = { x: e.clientX, y: e.clientY }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
+    wrap.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const k = W / cv.clientWidth * 1.15;
+      tgtX = Math.max(0, Math.min(W, tgtX + (e.clientX - drag.x) * k));
+      tgtY = Math.max(0, Math.min(H, tgtY + (e.clientY - drag.y) * k));
+      drag = { x: e.clientX, y: e.clientY };
+    });
+    const end = () => { drag = null; };
+    wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
+    const kd = e => {
+      if (!wrap.isConnected) return document.removeEventListener('keydown', kd);
+      if (/^(Arrow|Key[WASD])/.test(e.code)) { e.preventDefault(); keys.add(e.code); }
+    };
+    const ku = e => { keys.delete(e.code); if (!wrap.isConnected) document.removeEventListener('keyup', ku); };
+    document.addEventListener('keydown', kd); document.addEventListener('keyup', ku);
+  }
+
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1), cw = cv.clientWidth || 340;
+    const ch = cw * H / W;
+    if (cv.width !== Math.round(cw * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); cv.style.height = ch + 'px'; }
+    return cv.width / W; // 1칸당 픽셀
+  }
+
+  let lastFrame = performance.now();
+  function frame(now) {
+    if (!wrap.isConnected) return;
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+    if (!lastS || !lastS.meteor) return;
+    const tau = (serverNow() - goAt) / 1000;
+    const playing = lastS.phase === 'playing';
+    const meDown = lastMe ? (lastMe.down || Date.now() - hitAt < 700) : false;
+
+    // 내 움직임
+    if (ctx && lastMe && playing && !meDown) {
+      let kx = 0, ky = 0;
+      if (keys.has('ArrowLeft') || keys.has('KeyA')) kx--; if (keys.has('ArrowRight') || keys.has('KeyD')) kx++;
+      if (keys.has('ArrowUp') || keys.has('KeyW')) ky--; if (keys.has('ArrowDown') || keys.has('KeyS')) ky++;
+      if (kx || ky) { const d = Math.hypot(kx, ky); tgtX = Math.max(0, Math.min(W, myX + kx / d * 8)); tgtY = Math.max(0, Math.min(H, myY + ky / d * 8)); }
+      const dx = tgtX - myX, dy = tgtY - myY, d = Math.hypot(dx, dy), step = Eng ? Eng.METEOR.speed * dt : 42 * dt;
+      if (d <= step) { myX = tgtX; myY = tgtY; } else { myX += dx / d * step; myY += dy / d * step; }
+      // 맞았는지 내 화면에서 바로 확인
+      if (Date.now() > shieldLocal) {
+        for (const m of meteors) {
+          const a = tau - m.t0;
+          if (a < 0 || a > m.life) continue;
+          if (Math.hypot(m.x + m.vx * a - myX, m.y + m.vy * a - myY) < m.r + PR * 0.85) {
+            hitAt = Date.now(); ctx.act('hit'); if (navigator.vibrate) navigator.vibrate(120); break;
+          }
+        }
+      }
+      if (now - lastSent > 130 && (Math.abs(myX - sentX) > 0.05 || Math.abs(myY - sentY) > 0.05)) {
+        lastSent = now; sentX = myX; sentY = myY; ctx.act('pos', { x: myX, y: myY });
+      }
+    }
+    draw(tau);
+  }
+  requestAnimationFrame(frame);
+
+  function draw(tau) {
+    const k = resize(), w = cv.width, hgt = cv.height;
+    // 우주 배경
+    const bg = g.createRadialGradient(w * 0.5, hgt * 0.4, 10, w * 0.5, hgt * 0.5, w * 0.8);
+    bg.addColorStop(0, '#22306b'); bg.addColorStop(1, '#0b1030');
+    g.fillStyle = bg; g.fillRect(0, 0, w, hgt);
+    for (const st of stars) {
+      g.globalAlpha = 0.45 + 0.4 * Math.sin(tau * 2 + st.p);
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(st.x * k, st.y * k, st.r * k, 0, 7); g.fill();
+    }
+    g.globalAlpha = 1;
+    // 운석
+    for (const m of meteors) {
+      const a = tau - m.t0;
+      if (a < 0 || a > m.life) continue;
+      const x = (m.x + m.vx * a) * k, y = (m.y + m.vy * a) * k, r = m.r * k, sp = Math.hypot(m.vx, m.vy);
+      const tx = x - (m.vx / sp) * r * 3.2, ty = y - (m.vy / sp) * r * 3.2;
+      const tr = g.createLinearGradient(x, y, tx, ty);
+      tr.addColorStop(0, 'rgba(255,170,60,.85)'); tr.addColorStop(1, 'rgba(255,90,30,0)');
+      g.strokeStyle = tr; g.lineWidth = r * 1.3; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
+      g.save(); g.translate(x, y); g.rotate(a * m.spin);
+      g.fillStyle = '#8d7966'; g.strokeStyle = '#2a1e14'; g.lineWidth = Math.max(1.5, k * 0.35);
+      g.beginPath();
+      for (let i = 0; i < 8; i++) { const ang = i / 8 * Math.PI * 2, rr = r * (0.82 + ((i * 7) % 3) * 0.09); g.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr); }
+      g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = '#6b5a4a';
+      g.beginPath(); g.arc(-r * 0.3, -r * 0.2, r * 0.22, 0, 7); g.arc(r * 0.3, r * 0.25, r * 0.16, 0, 7); g.fill();
+      g.restore();
+    }
+    // 친구들
+    const css = getComputedStyle(document.documentElement);
+    const col = { red: css.getPropertyValue('--red').trim() || '#ff4d4d', blue: css.getPropertyValue('--blue').trim() || '#2f7bff' };
+    const names = new Map(roster.map(p => [p.id, p.name]));
+    for (const [id, o] of others) {
+      o.x += (o.tx - o.x) * 0.3; o.y += (o.ty - o.y) * 0.3;
+      if (lastMe && id === lastMe.id) continue;
+      drawPlayer(o.x * k, o.y * k, PR * k, o.team, o.down, o.rev, o.shield, initial(names.get(id)), false, col, k);
+    }
+    if (ctx && lastMe) {
+      const meDown = lastMe.down || Date.now() - hitAt < 700;
+      drawPlayer(myX * k, myY * k, PR * k * 1.25, lastMe.team, meDown, (others.get(lastMe.id) || {}).rev || 0, Date.now() < shieldLocal, '', true, col, k);
+    }
+  }
+
+  function drawPlayer(x, y, r, team, down, rev, shield, label, isMe, col, k) {
+    g.save();
+    if (down) {
+      g.strokeStyle = 'rgba(255,255,255,.35)'; g.setLineDash([k * 0.8, k * 0.8]); g.lineWidth = Math.max(1, k * 0.25);
+      g.beginPath(); g.arc(x, y, RR * k, 0, 7); g.stroke(); g.setLineDash([]);
+      g.fillStyle = '#7d8190'; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, k * 0.4);
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke();
+      g.strokeStyle = '#fff'; g.lineWidth = Math.max(1.5, k * 0.45);
+      g.beginPath(); g.moveTo(x - r * 0.45, y - r * 0.45); g.lineTo(x + r * 0.45, y + r * 0.45); g.moveTo(x + r * 0.45, y - r * 0.45); g.lineTo(x - r * 0.45, y + r * 0.45); g.stroke();
+      if (rev > 0) { g.strokeStyle = col[team]; g.lineWidth = Math.max(2, k * 0.7); g.beginPath(); g.arc(x, y, r + k * 0.9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rev / 100); g.stroke(); }
+    } else {
+      if (isMe) {
+        const im = img(team);
+        g.fillStyle = col[team]; g.beginPath(); g.arc(x, y, r * 1.08, 0, 7); g.fill();
+        g.lineWidth = Math.max(2, k * 0.5); g.strokeStyle = '#ffe11a'; g.stroke();
+        if (im.complete && im.naturalWidth) g.drawImage(im, x - r * 1.05, y - r * 1.05, r * 2.1, r * 2.1);
+      } else {
+        g.fillStyle = col[team]; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, k * 0.4);
+        g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke();
+        g.fillStyle = '#fff'; g.font = `${Math.round(r * 1.1)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(label, x, y + r * 0.05);
+      }
+      if (shield) { g.strokeStyle = 'rgba(160,230,255,.9)'; g.setLineDash([k * 0.6, k * 0.5]); g.lineWidth = Math.max(1.5, k * 0.35); g.beginPath(); g.arc(x, y, r + k * 1.1, 0, 7); g.stroke(); }
+    }
+    g.restore();
+  }
+
+  return {
+    root: h('div', {}, scoreBox, wrap, tk && tk.root),
+    update(s, me, rs) {
+      lastS = s; lastMe = me; roster = rs || roster;
+      const M = s.meteor;
+      W = M.w; H = M.h; PR = M.pr; RR = M.reviveR; goAt = M.goAt;
+      offset = Math.max(offset, M.now - Date.now()); // 서버 시계 맞추기
+      if (M.seed !== seed && Eng) { seed = M.seed; meteors = Eng.makeMeteors(seed); }
+      const seen = new Set();
+      for (const [id, x, y, team, down, rev, shield] of M.pos) {
+        seen.add(id);
+        const o = others.get(id) || { x, y };
+        Object.assign(o, { tx: x, ty: y, team, down, rev, shield });
+        others.set(id, o);
+      }
+      for (const id of [...others.keys()]) if (!seen.has(id)) others.delete(id);
+      if (me) {
+        if (!placed || me.down) { myX = tgtX = me.x; myY = tgtY = me.y; placed = true; }
+        shieldLocal = Date.now() + (me.shield || 0);
+        if (!me.down && Date.now() - hitAt > 700) hitAt = 0;
+        banner.hidden = !me.down;
+        banner.textContent = '쾅! 쓰러졌어요. 팀원이 옆에 오면 부활해요';
+      }
+      setOnce(scoreBox, JSON.stringify(M.score) + JSON.stringify(M.alive) + JSON.stringify(s.counts) + teamsStamp, () => ['red', 'blue'].map(t =>
+        h('div', { class: `meteor-team t-${t}` }, teamTag(t), h('b', { text: `${M.score[t]}점` }), h('small', { text: `생존 ${M.alive[t]}/${s.counts[t]}` }))));
+      if (tk && me) { tk.who(me.team); tk.say(me.down ? '쾅! 쓰러졌어. 우리 팀 친구가 옆에 2초 있으면 부활할 수 있어!' : TIPS.meteor); }
+    },
+  };
+}
+
+/* ⑧ 단체 가위바위보 */
+const RPS_ICON = { r: '✊', p: '✋', s: '✌️' };
+const RPS_NAME = { r: '바위', p: '보', s: '가위' };
+function rpsGame(ctx) {
+  const score = h('div', { class: 'rps-score' });
+  const info = h('div', { class: 'rps-info' });
+  const stage = h('div', { class: 'box rps-stage' });
+  const picks = h('div', { class: 'rps-picks' });
+  const log = h('ul', { class: 'rps-log' });
+  const btns = {};
+  if (ctx) {
+    for (const c of ['r', 'p', 's']) {
+      const b = h('button', { class: 'rps-btn', type: 'button' }, h('span', { class: 'rps-emoji', text: RPS_ICON[c] }), h('span', { text: RPS_NAME[c] }), h('small'));
+      b.addEventListener('pointerdown', e => { e.preventDefault(); if (!b.disabled) { ctx.act('pick', { c }); if (navigator.vibrate) navigator.vibrate(10); picked = c; paint(); } });
+      btns[c] = b; picks.append(b);
+    }
+  }
+  const tk = ctx ? techking(TIPS.rps) : null;
+  let picked = null, lastS = null, lastMe = null;
+  function paint() {
+    if (!ctx || !lastS) return;
+    const R = lastS.rps, live = lastS.phase === 'playing' && R.state === 'pick';
+    const mine = picked || (lastMe && lastMe.pick);
+    for (const c of ['r', 'p', 's']) {
+      const b = btns[c];
+      b.disabled = !live;
+      b.classList.toggle('on', mine === c);
+      const v = lastMe && lastMe.teamVotes ? lastMe.teamVotes[c] : 0;
+      b.querySelector('small').textContent = live ? (v ? `우리 팀 ${v}명` : '') : '';
+    }
+  }
+  const dots = (n, w) => '●'.repeat(n) + '○'.repeat(Math.max(0, w - n));
+  return {
+    root: h('div', {}, score, info, stage, picks, log, tk && tk.root),
+    update(s, me) {
+      const prev = lastS && lastS.rps;
+      lastS = s; lastMe = me;
+      const R = s.rps;
+      if (!prev || prev.round !== R.round) picked = null; // 새 라운드
+      setOnce(score, JSON.stringify(R.wins) + teamsStamp, () => ['red', 'blue'].map(t =>
+        h('div', { class: `rps-team t-${t}` }, teamTag(t), h('b', { text: dots(R.wins[t], R.win) }), h('small', { text: `${R.wins[t]}승` }))));
+      const cnt = s.counts || { red: 0, blue: 0 };
+      info.textContent = R.round ? `${R.round}라운드 · ${R.win}판 먼저 이기면 승리` : '곧 시작해요';
+      const key = R.state + R.round + (R.state === 'pick' ? JSON.stringify(R.voted) : '') + teamsStamp + (me ? me.team : '');
+      setOnce(stage, key, () => {
+        if (R.state === 'pick') {
+          return [h('div', { class: 'rps-title', text: '무엇을 낼까? 팀원이 가장 많이 낸 손이 우리 팀 손!' }),
+            h('div', { class: 'rps-vs' }, ...['red', 'blue'].map(t => h('div', { class: `rps-side t-${t}` },
+              h('img', { src: MASCOT[t], alt: '' }), h('div', { class: 'rps-hand hidden', text: '❔' }),
+              h('small', { text: `${R.voted[t]}/${cnt[t]}명 골랐어요` }))))];
+        }
+        const L = R.last;
+        if (!L) return [h('div', { class: 'rps-title', text: '준비! 곧 1라운드가 시작돼요' })];
+        const res = L.winner === 'draw' ? '비겼어요! 다시 한 번!' : `${TEAM_KO[L.winner]} 승!`;
+        return [h('div', { class: 'rps-title', text: `${L.round}라운드 결과 — ${res}` }),
+          h('div', { class: 'rps-vs' }, ...['red', 'blue'].map(t => h('div', { class: `rps-side t-${t}` + (L.winner === t ? ' win' : '') },
+            h('img', { src: MASCOT[t], alt: '' }), h('div', { class: 'rps-hand pop', text: RPS_ICON[L.hands[t]] }),
+            h('small', { text: ['r', 'p', 's'].map(c => `${RPS_ICON[c]}${L.counts[t][c]}`).join(' ') }))))];
+      });
+      setOnce(log, R.log.map(x => x.round + x.winner).join() + teamsStamp, () => R.log.slice().reverse().map(x =>
+        h('li', {}, h('b', { text: `${x.round}R` }), ' ', teamTag('red', RPS_ICON[x.hands.red]), ' vs ', teamTag('blue', RPS_ICON[x.hands.blue]), ' ',
+          x.winner === 'draw' ? '무승부' : `${TEAM_KO[x.winner]} 승`)));
+      if (ctx) {
+        paint();
+        tk.who(me.team);
+        tk.say(R.state === 'pick' ? (me.pick ? `${RPS_NAME[me.pick]}를 냈어! 시간 안에는 바꿀 수 있어. 우리 팀 숫자를 보고 맞춰 봐!` : TIPS.rps) : TIPS.rps);
       }
     },
   };

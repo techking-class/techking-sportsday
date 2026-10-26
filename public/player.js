@@ -41,21 +41,34 @@ function showJoin() {
 }
 
 let shell = null;
-function start() {
-  joinView.hidden = true;
-  playView.hidden = false;
+function buildShell() {
   const meLine = h('div', { class: 'me-line' });
   const top = hud();
   const content = h('div', {});
   const overlay = h('div', { class: 'overlay', hidden: '' });
   playView.replaceChildren(meLine, top.root, content, overlay);
-  shell = { meLine, top, content, overlay };
+  shell = { meLine, top, content, overlay, stamp: teamsStamp };
+  mountedKey = '';
+}
+// 시작 화면에 팀 대표 이미지·이름 보여주기
+function drawHero() {
+  document.getElementById('heroA').src = MASCOT.red;
+  document.getElementById('heroB').src = MASCOT.blue;
+  document.getElementById('heroText').textContent = `친구들과 ${TEAM_KO.red} · ${euro(TEAM_KO.blue)} 나뉘어 겨뤄요`;
+}
+post('/api/teams', {}).then(cfg => { applyTeams(cfg); drawHero(); }).catch(() => {});
+
+function start() {
+  joinView.hidden = true;
+  playView.hidden = false;
+  buildShell();
   if (es) es.close();
   es = connect('/events?id=' + encodeURIComponent(myId), onMsg);
 }
 
 function onMsg(msg) {
   if (msg.roster) roster = msg.roster;
+  if (msg.teams) { applyTeams(msg.teams); drawHero(); }
   if (msg.me === null) { myId = null; store.set('tk_id', null); showJoin(); return; }
   me = msg.me;
   render(msg.s);
@@ -63,7 +76,7 @@ function onMsg(msg) {
 
 const ctx = {
   tap(type) { pending[type] = (pending[type] || 0) + 1; },
-  act(type, data) { post('/api/act', Object.assign({ id: myId, type }, data)).catch(() => {}); },
+  act(type, data) { return post('/api/act', Object.assign({ id: myId, type }, data)).catch(() => {}); },
 };
 // 0.15초마다 모아서 한 번에 보내기 (서버 부담 줄이기)
 setInterval(() => {
@@ -76,6 +89,7 @@ setInterval(() => {
 
 let lastCount = -1;
 function render(s) {
+  if (shell.stamp !== teamsStamp) buildShell(); // 팀 이름·색·이미지가 바뀌면 화면을 새로 그려요
   setOnce(shell.meLine, me.team + me.name + s.eventName, () => [
     h('span', {}, teamTag(me.team), ' ', me.name), h('span', { text: s.eventName || '대기실' })]);
   shell.top.update(s);

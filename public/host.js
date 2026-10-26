@@ -24,15 +24,20 @@ function cmd(name, extra) {
   return post('/api/host', Object.assign({ pin, cmd: name }, extra)).catch(ex => alert(ex.message));
 }
 
+let addr = location.origin;
+let decoOpen = false;
 async function openDash() {
   document.getElementById('login').hidden = true;
-  const dash = document.getElementById('dash');
-  dash.hidden = false;
-
-  let addr = location.origin;
+  document.getElementById('dash').hidden = false;
   if (/localhost|127\.0\.0\.1/.test(location.hostname)) {
     try { const info = await post('/api/info', {}); if (info.addresses[0]) addr = info.addresses[0]; } catch (e) {}
   }
+  buildDash();
+  connect('/events?host=' + encodeURIComponent(pin), onMsg);
+}
+
+function buildDash() {
+  const dash = document.getElementById('dash');
   const top = hud();
   const joinUrl = h('div', { class: 'join-url' }, h('small', { text: '학생 접속 주소' }), addr.replace(/^https?:\/\//, ''));
   const count = h('div', { class: 'big-team' });
@@ -51,6 +56,10 @@ async function openDash() {
   const resetBtn = h('button', { class: 'btn small ghost', type: 'button', text: '점수 초기화', onclick: () => { if (confirm('누적 점수를 0으로 되돌릴까요?')) cmd('resetScores'); } });
 
   const cols = h('div', { class: 'team-cols host-roster' });
+  const editor = teamEditor(async cfg => { await post('/api/host', { pin, cmd: 'teams', teams: cfg }); });
+  const deco = h('details', { class: 'box deco' }, h('summary', { text: '🎨 팀 꾸미기 (이름 · 색깔 · 대표 이미지)' }), editor.root);
+  if (decoOpen) deco.open = true;
+  deco.addEventListener('toggle', () => { decoOpen = deco.open; });
   const hist = h('ul', { class: 'history' });
   const stage = h('div', { class: 'box stage' });
 
@@ -63,15 +72,17 @@ async function openDash() {
         h('div', { class: 'box', style: 'margin-top:16px' }, count, cols,
           h('p', { class: 'hint', text: '이름을 누르면 팀을 바꿀 수 있어요.' }),
           h('div', { class: 'controls' }, shuffleBtn, cleanBtn, resetBtn)),
-        hist),
+        deco, hist),
       stage));
-  ui = { top, count, cols, hist, stage, startBtn, stopBtn, shuffleBtn };
-  connect('/events?host=' + encodeURIComponent(pin), onMsg);
+  ui = { top, count, cols, hist, stage, startBtn, stopBtn, shuffleBtn, stamp: teamsStamp };
+  stageKey = ''; rosterKey = '';
 }
 
 let rosterKey = '';
 function onMsg(msg) {
   if (msg.roster) roster = msg.roster;
+  if (msg.teams) applyTeams(msg.teams);
+  if (ui.stamp !== teamsStamp) buildDash(); // 팀 설정이 바뀌면 다시 그리기
   const s = msg.s;
   ui.top.update(s);
   const live = s.phase === 'playing' || s.phase === 'countdown';
@@ -79,7 +90,8 @@ function onMsg(msg) {
   ui.stopBtn.disabled = !live;
   ui.shuffleBtn.disabled = live;
   const on = roster.filter(p => p.on).length;
-  ui.count.textContent = `지금 ${on}명 참가 중`;
+  const c = s.counts;
+  ui.count.textContent = `지금 ${on}명 참가 중` + (c.red !== c.blue ? ` · ⚖ ${c.red}:${c.blue} 인원 자동 보정 중` : '');
 
   const k = roster.map(p => p.id + p.team + p.on + p.name).join();
   if (k !== rosterKey) { rosterKey = k; ui.cols.replaceChildren(...teamColumns(roster, null, p => cmd('move', { id: p.id }))); }
@@ -92,7 +104,7 @@ function onMsg(msg) {
       const tk = techking('');
       stageView = {
         root: h('div', {}, tk.root, h('p', { class: 'tap-hint', text: '왼쪽에서 경기를 고르고 [경기 시작]을 누르세요. 3초 카운트다운 후 시작돼요.' })),
-        update() { tk.say(on ? `${on}명이 모였어! 테크킹팀 대 대니쌤팀, 누가 이길까?` : '학생들이 위 주소로 들어오면 여기에 이름이 나타나요.'); },
+        update() { tk.say(on ? `${on}명이 모였어! ${TEAM_KO.red} 대 ${TEAM_KO.blue}, 누가 이길까?` : '학생들이 위 주소로 들어오면 여기에 이름이 나타나요.'); },
       };
     } else if (s.phase === 'result') {
       stageView = { root: resultView(s, null) };

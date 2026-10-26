@@ -26,6 +26,35 @@ const players = engine.players;
 const clients = new Set();
 let dirty = true;
 
+/* ---------- 팀 꾸미기 (이름·색·대표 이미지) — teams.json에 저장돼요 ---------- */
+const TEAMS_FILE = path.join(__dirname, 'teams.json');
+const DEFAULT_TEAMS = {
+  red: { name: '테크킹팀', color: '#ff4d4d', img: null },   // img가 null이면 기본 캐릭터
+  blue: { name: '대니쌤팀', color: '#2f7bff', img: null },
+};
+function cleanTeams(input, base) {
+  const out = JSON.parse(JSON.stringify(base));
+  for (const k of ['red', 'blue']) {
+    const v = (input && input[k]) || {};
+    if (typeof v.name === 'string') out[k].name = v.name.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 8) || DEFAULT_TEAMS[k].name;
+    if (typeof v.color === 'string' && /^#[0-9a-f]{6}$/i.test(v.color)) out[k].color = v.color;
+    if (v.img === null) out[k].img = null;
+    else if (typeof v.img === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v.img) && v.img.length < 400000) out[k].img = v.img;
+  }
+  if (out.red.color.toLowerCase() === out.blue.color.toLowerCase()) out.blue.color = out.red.color === DEFAULT_TEAMS.blue.color ? DEFAULT_TEAMS.red.color : DEFAULT_TEAMS.blue.color;
+  return out;
+}
+let teams = DEFAULT_TEAMS;
+try { teams = cleanTeams(JSON.parse(fs.readFileSync(TEAMS_FILE, 'utf8')), DEFAULT_TEAMS); } catch (e) {}
+let teamsVersion = 1;
+engine.setTeamNames({ red: teams.red.name, blue: teams.blue.name });
+function saveTeams(input) {
+  teams = cleanTeams(input, teams);
+  teamsVersion++;
+  engine.setTeamNames({ red: teams.red.name, blue: teams.blue.name });
+  fs.writeFile(TEAMS_FILE, JSON.stringify(teams), () => {});
+}
+
 function cleanName(name) {
   name = String(name || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 10);
   return name || '친구' + (players.size + 1);
@@ -39,6 +68,7 @@ function broadcast() {
   for (const c of clients) {
     let msg = '{"s":' + pub;
     if (c.rv !== rv) { rosterJson = rosterJson || JSON.stringify(engine.roster()); msg += ',"roster":' + rosterJson; c.rv = rv; }
+    if (c.tv !== teamsVersion) { msg += ',"teams":' + JSON.stringify(teams); c.tv = teamsVersion; }
     if (c.playerId) msg += ',"me":' + JSON.stringify(engine.meState(players.get(c.playerId)));
     c.res.write('data: ' + msg + '}\n\n');
   }
@@ -65,7 +95,7 @@ function send(res, code, obj) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', chunk => { data += chunk; if (data.length > 10000) { reject(new Error('too big')); req.destroy(); } });
+    req.on('data', chunk => { data += chunk; if (data.length > 500000) { reject(new Error('too big')); req.destroy(); } });
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
@@ -96,6 +126,7 @@ function api(route, body, res) {
     engine.act(p, String(body.type || ''), body);
     return send(res, 200, { ok: true });
   }
+  if (route === '/api/teams') return send(res, 200, teams);
   if (route === '/api/info') return send(res, 200, { addresses: lanAddresses(), port: PORT });
   if (route === '/api/host') {
     if (String(body.pin) !== HOST_PIN) return send(res, 403, { error: 'PIN이 맞지 않아요.' });
@@ -108,6 +139,7 @@ function api(route, body, res) {
       case 'move': engine.moveTeam(body.id); break;
       case 'clean': engine.removeOffline(); break;
       case 'resetScores': engine.resetScores(); break;
+      case 'teams': saveTeams(body.teams); break;
       default: return send(res, 400, { error: '알 수 없는 명령' });
     }
     dirty = true;
@@ -129,7 +161,7 @@ function openStream(req, res, url) {
   res.on('error', () => {});
   res.write('retry: 2000\n\n');
   const p = pid ? players.get(pid) : null;
-  const c = { res, playerId: pid || null, rv: 0 };
+  const c = { res, playerId: pid || null, rv: 0, tv: 0 };
   clients.add(c);
   if (p) { p.conn = (p.conn || 0) + 1; p.lastSeen = now(); }
   dirty = true;
