@@ -388,8 +388,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .meteor-cv { display: block; width: 100%; }
 .meteor-banner { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: #fff; color: #000; border: 2.5px solid #000;
   border-radius: var(--wob); padding: 2px 12px; font-size: .95rem; white-space: nowrap; }
-.stage .meteor-wrap { max-width: 860px; margin: 0 auto; }
-.stage .meteor-score { max-width: 860px; margin: 0 auto 8px; }
+.stage .meteor-wrap { max-width: 640px; margin: 0 auto; }
+.stage .meteor-score { max-width: 640px; margin: 0 auto 8px; }
 
 /* ⑧ 단체 가위바위보 */
 .rps-score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -422,14 +422,15 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .stage .rps-side img { width: 90px; height: 90px; }
 .stage .rps-stage, .stage .rps-score { max-width: 760px; margin-left: auto; margin-right: auto; }
 
-/* 운석 피하기 조이스틱 (왼쪽 아래) */
-.joy { position: absolute; left: 10px; bottom: 10px; width: 108px; height: 108px; border-radius: 50%;
-  background: rgba(255,255,255,.16); border: 3px solid rgba(255,255,255,.65); touch-action: none; z-index: 3; }
-.joy::after { content: ""; position: absolute; inset: 30%; border-radius: 50%; border: 2px dashed rgba(255,255,255,.35); }
-.joy.on { background: rgba(255,255,255,.26); }
-.joy-knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
+/* 운석 피하기 조이스틱 (경기장 아래 왼쪽) */
+.joy-row { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+.joy-row small { color: var(--muted); }
+.joy { position: relative; flex: none; width: 116px; height: 116px; border-radius: 50%;
+  background: var(--paper); border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); touch-action: none; }
+.joy::after { content: ""; position: absolute; inset: 30%; border-radius: 50%; border: 2px dashed var(--muted); }
+.joy.on { background: color-mix(in srgb, var(--crown) 25%, var(--paper)); }
+.joy-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
   background: var(--crown); border: 3px solid #000; box-shadow: 0 3px 0 #000; z-index: 1; pointer-events: none; }
-@media (min-width: 700px) { .joy { width: 124px; height: 124px; } }
 
 /* 참가자 관리 메뉴 */
 .pmenu-back { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: grid; place-items: center; padding: 16px; }
@@ -449,3 +450,11 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .bak-cv { display: block; width: 100%; }
 .stage .bak-wrap, .stage .bak-bars { max-width: 860px; margin-left: auto; margin-right: auto; }
 .stage .bak-bars { margin-bottom: 8px; }
+
+/* 운석 피하기: 아이템 소식·효과 */
+.meteor-feed { position: absolute; left: 8px; right: 8px; bottom: 8px; display: grid; gap: 4px; justify-items: center; pointer-events: none; }
+.feed-item { background: #fff; color: #000; border: 2.5px solid var(--team); border-radius: var(--wob); padding: 1px 10px; font-size: .9rem; animation: feedin .3s ease-out; }
+@keyframes feedin { from { transform: translateY(8px); opacity: 0; } }
+.meteor-effects { font-size: 1.05rem; min-height: 1.5em; margin-top: 4px; }
+.item-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
+.legend-chip { border: 2px solid var(--ink); border-radius: var(--wob); padding: 1px 8px; background: var(--paper); font-size: .85rem; cursor: help; }

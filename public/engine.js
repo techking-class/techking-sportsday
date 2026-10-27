@@ -32,8 +32,8 @@
   // 단체 가위바위보: 팀원이 가장 많이 낸 손이 팀의 손! 3판 먼저 이기면 승리
   const RPS = { pickMs: 7000, revealMs: 3500, win: 3, maxRounds: 9 };
   const BEATS = { r: 's', s: 'p', p: 'r' }; // 바위>가위, 가위>보, 보>바위
-  // 운석 피하기: 넓은 우주 공간 가로 170 × 세로 120 (화면은 내 주변만 보여주고 따라다녀요)
-  const METEOR = { w: 170, h: 120, pr: 2.4, speed: 30, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
+  // 운석 피하기: 우주 공간 가로 130 × 세로 130 (한 화면에 전체가 보여요)
+  const METEOR = { w: 130, h: 130, pr: 2.8, speed: 30, fast: 1.6, itemR: 3.4, tiny: 0.5, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
 
   // 모든 화면이 같은 순서·같은 시간에 같은 운석을 보도록, 같은 '씨앗(seed)'으로 운석 목록을 계산해요
   function mulberry32(a) {
@@ -49,19 +49,44 @@
     let t = 1.5;
     while (t < durSec) {
       const prog = t / durSec;
-      t += -Math.log(1 - R()) / ((0.55 + 2.6 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
+      t += -Math.log(1 - R()) / ((0.4 + 1.8 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
       const edge = Math.floor(R() * 4);
       let x, y;
       if (edge === 0) { x = R() * W; y = -m; } else if (edge === 1) { x = W + m; y = R() * H; }
       else if (edge === 2) { x = R() * W; y = H + m; } else { x = -m; y = R() * H; }
       const tx = W * (0.15 + 0.7 * R()), ty = H * (0.15 + 0.7 * R());
-      const sp = 9 + 10 * prog + R() * 7, d = Math.hypot(tx - x, ty - y);
-      out.push({ t0: t, x, y, vx: ((tx - x) / d) * sp, vy: ((ty - y) / d) * sp,
-        r: 1.8 + R() * 2.6 * (0.6 + 0.6 * prog), life: (Math.hypot(W, H) + 2 * m) / sp, spin: R() * 4 - 2 });
+      // 운석 종류: 느릿느릿 큰 바위 / 보통 / 쌩 날아오는 작은 운석
+      const roll = R(), a1 = R(), a2 = R();
+      let sp, r, kind;
+      if (roll < 0.18 + 0.12 * prog) { kind = 'fast'; sp = 20 + a1 * 12; r = 1.3 + a2 * 0.9; }
+      else if (roll < 0.45) { kind = 'slow'; sp = 4.5 + a1 * 4; r = 3.6 + a2 * 1.8; }
+      else { kind = 'mid'; sp = 9 + a1 * 7 + 5 * prog; r = 2 + a2 * 1.6; }
+      const d = Math.hypot(tx - x, ty - y);
+      out.push({ t0: t, x, y, vx: ((tx - x) / d) * sp, vy: ((ty - y) / d) * sp, r, kind,
+        life: (Math.hypot(W, H) + 2 * m) / sp, spin: R() * 4 - 2 });
     }
     return out;
   }
-  
+  // 아이템도 같은 씨앗으로 정해서 모두에게 같은 시간·같은 자리에 나타나요
+  const ITEM_KINDS = {
+    shield: { icon: '🛡️', name: '보호막', desc: '5초 동안 운석에 안 맞아요' },
+    bolt: { icon: '⚡', name: '번개', desc: '5초 동안 빨라져요' },
+    heart: { icon: '💖', name: '단체 부활', desc: '쓰러진 우리 팀이 모두 일어나요' },
+    ice: { icon: '❄️', name: '얼음', desc: '상대 팀이 2.5초 동안 꽁꽁 얼어요' },
+    star: { icon: '⭐', name: '별', desc: '우리 팀 +20점' },
+    mush: { icon: '🍄', name: '꼬마버섯', desc: '6초 동안 작아져서 잘 안 맞아요' },
+  };
+  function makeItems(seed, durSec = 60) {
+    const R = mulberry32((seed ^ 0x9e3779b9) >>> 0), W = METEOR.w, H = METEOR.h, out = [];
+    const bag = ['shield', 'bolt', 'heart', 'ice', 'star', 'mush', 'shield', 'star', 'bolt', 'mush'];
+    let t = 4;
+    while (t < durSec - 3) {
+      out.push({ t0: t, life: 8, kind: bag[Math.floor(R() * bag.length)], x: 12 + R() * (W - 24), y: 12 + R() * (H - 24) });
+      t += 3.5 + R() * 3;
+    }
+    return out;
+  }
+
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const r1 = v => Math.round(v * 10) / 10;
   function shuffle(a) {
@@ -98,6 +123,7 @@
       p.stamina = 100; p.exhausted = false; p.lastTapAt = 0; p.cellAt = 0;
       p.tokens = 14; p.tokenAt = t; p.rope = 0; p.ropeAt = 0;
       p.down = false; p.rev = 0; p.shieldUntil = 0; p.posAt = t; p.hits = 0;
+      p.fastUntil = 0; p.tinyUntil = 0; p.frozenUntil = 0;
       p.throwAt = 0; p.bakHits = 0;
       p.x = p.team === 'red' ? 6 : 94; p.y = 30; p.tx = p.x; p.ty = p.y;
     }
@@ -166,7 +192,8 @@
         game.rps = { round: 0, state: 'reveal', revealUntil: goAt, picks: {}, wins: { red: 0, blue: 0 }, log: [], roundStart: 0, roundEndAt: 0, over: false };
       }
       if (ev === 'meteor') {
-        game.meteor = { seed: Math.floor(Math.random() * 2 ** 31), score: { red: 0, blue: 0 }, scoreAt: goAt };
+        const seed = Math.floor(Math.random() * 2 ** 31);
+        game.meteor = { seed, score: { red: 0, blue: 0 }, scoreAt: goAt, items: makeItems(seed), taken: [], feed: [] };
         for (const team of TEAMS) {
           const list = members(team);
           list.forEach((p, k) => {
@@ -430,10 +457,11 @@
     /* ---------- ⑦ 운석 피하기 ---------- */
     // 내 위치와 '맞았다'는 각자 휴대폰이 판단해서 알려줘요 (지연 없이 공정하게). 서버는 부활과 점수를 맡아요.
     function meteorPos(p, x, y, t) {
-      if (p.down) return;
+      if (p.down || t < p.frozenUntil) { p.posAt = t; return; }
       x = Number(x); y = Number(y);
       if (!isFinite(x) || !isFinite(y)) return;
-      const dt = Math.max(0.05, (t - p.posAt) / 1000), max = METEOR.speed * dt * 1.4 + 1.5; // 순간이동 막기
+      const sp = METEOR.speed * (t < p.fastUntil ? METEOR.fast : 1);
+      const dt = Math.max(0.05, (t - p.posAt) / 1000), max = sp * dt * 1.4 + 1.5; // 순간이동 막기
       const dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy);
       const k = d > max ? max / d : 1;
       p.x = clamp(p.x + dx * k, 0, METEOR.w); p.y = clamp(p.y + dy * k, 0, METEOR.h); p.posAt = t;
@@ -441,6 +469,28 @@
     function meteorHit(p, t) {
       if (p.down || t < p.shieldUntil) return;
       p.down = true; p.rev = 0; p.hits++;
+    }
+    // 아이템 줍기: 서버가 '먼저 온 한 명'만 인정해요
+    function meteorItem(p, i, t) {
+      const M = game.meteor, it = M.items[Math.floor(Number(i))];
+      if (!it || p.down || M.taken.includes(i)) return;
+      const tau = (t - game.goAt) / 1000;
+      if (tau < it.t0 - 0.5 || tau > it.t0 + it.life + 0.7) return;
+      if (Math.hypot(p.x - it.x, p.y - it.y) > METEOR.pr + METEOR.itemR + 7) return; // 지연을 감안한 거리 여유
+      M.taken.push(i);
+      const other = p.team === 'red' ? 'blue' : 'red';
+      let extra = '';
+      if (it.kind === 'shield') p.shieldUntil = Math.max(p.shieldUntil, t + 5000);
+      else if (it.kind === 'bolt') p.fastUntil = t + 5000;
+      else if (it.kind === 'mush') p.tinyUntil = t + 6000;
+      else if (it.kind === 'star') M.score[p.team] += 20;
+      else if (it.kind === 'heart') {
+        let n = 0;
+        for (const q of members(p.team)) if (q.down) { q.down = false; q.rev = 0; q.shieldUntil = t + METEOR.shieldMs; n++; }
+        extra = n ? ` ${n}명 부활!` : '';
+      } else if (it.kind === 'ice') { for (const q of members(other)) if (!q.down) q.frozenUntil = t + 2500; }
+      M.feed.push({ at: t, name: p.name, team: p.team, kind: it.kind, extra });
+      if (M.feed.length > 6) M.feed.shift();
     }
     function aliveCount(team) { return members(team).filter(p => !p.down).length; }
     function tickMeteor(t) {
@@ -477,7 +527,11 @@
         case 'flip': if (type === 'cell') return flipHit(p, d.i, t); break;
         case 'rps': if (type === 'pick') rpsPick(p, d.c, t); break;
         case 'bak': if (type === 'hit') bakHit(p, t); break;
-        case 'meteor': if (type === 'pos') meteorPos(p, d.x, d.y, t); else if (type === 'hit') meteorHit(p, t); break;
+        case 'meteor':
+          if (type === 'pos') meteorPos(p, d.x, d.y, t);
+          else if (type === 'hit') meteorHit(p, t);
+          else if (type === 'item') meteorItem(p, Math.floor(Number(d.i)), t);
+          break;
       }
       return true;
     }
@@ -557,7 +611,11 @@
         s.meteor = {
           seed: M.seed, goAt: game.goAt, now: t, w: METEOR.w, h: METEOR.h, pr: METEOR.pr, reviveR: METEOR.reviveR, speed: METEOR.speed,
           score: M.score, alive: { red: aliveCount('red'), blue: aliveCount('blue') },
-          pos: list.map(p => [p.id, r1(p.x), r1(p.y), p.team, p.down ? 1 : 0, Math.round((p.rev / METEOR.reviveMs) * 100), t < p.shieldUntil ? 1 : 0]),
+          // [아이디, x, y, 팀, 쓰러짐, 부활%, 보호막, 번개, 꼬마, 얼음]
+          pos: list.map(p => [p.id, r1(p.x), r1(p.y), p.team, p.down ? 1 : 0, Math.round((p.rev / METEOR.reviveMs) * 100), t < p.shieldUntil ? 1 : 0,
+            t < p.fastUntil ? 1 : 0, t < p.tinyUntil ? 1 : 0, t < p.frozenUntil ? 1 : 0]),
+          taken: M.taken, feed: M.feed.filter(f => t - f.at < 3000).map(f => ({ name: f.name, team: f.team, kind: f.kind, extra: f.extra, ago: t - f.at })),
+          itemR: METEOR.itemR, fast: METEOR.fast,
         };
       }
       if (ev === 'flip' && game.flip) {
@@ -580,7 +638,10 @@
       if (ev === 'flip') m.coolMs = coolFor(p, FLIP_COOL);
       if (ev === 'bak') m.bakHits = p.bakHits;
       if (ev === 'rps' && game.rps) { m.pick = game.rps.picks[p.id] || null; m.teamVotes = teamVotes(p.team); } // 우리 팀 투표 현황은 우리 팀만 봐요
-      if (ev === 'meteor') { m.x = r1(p.x); m.y = r1(p.y); m.down = p.down; m.shield = Math.max(0, p.shieldUntil - t); }
+      if (ev === 'meteor') {
+        m.x = r1(p.x); m.y = r1(p.y); m.down = p.down; m.shield = Math.max(0, p.shieldUntil - t);
+        m.fast = Math.max(0, p.fastUntil - t); m.tiny = Math.max(0, p.tinyUntil - t); m.frozen = Math.max(0, p.frozenUntil - t);
+      }
       if (ev === 'relay' && game.relay) {
         const r = game.relay[p.team], cur = runnerOf(r);
         m.role = r.finishedAt ? 'done' : cur === p.id ? (r.state === 'handoff' ? 'baton' : 'run')
@@ -621,5 +682,5 @@
     };
   }
 
-  return { createEngine, EVENT_NAMES, DURATION, TEAMS, iga, makeMeteors, METEOR };
+  return { createEngine, EVENT_NAMES, DURATION, TEAMS, iga, makeMeteors, makeItems, ITEM_KINDS, METEOR };
 });

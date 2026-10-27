@@ -396,29 +396,35 @@ function flipGame(ctx) {
   };
 }
 
-/* ⑦ 운석 피하기 — 넓은 우주 공간 (화면이 나를 따라다니고, 왼쪽 아래 조이스틱으로 움직여요) */
+/* ⑦ 운석 피하기 — 우주 전체가 한 화면에 보이고, 아래 왼쪽 조이스틱으로 움직여요 */
 function meteorGame(ctx) {
   const Eng = (typeof TechkingEngine !== 'undefined') ? TechkingEngine : null;
-  const VIEW_W = 100, VIEW_H = 78;                     // 학생 화면에 보이는 범위
   const wrap = h('div', { class: 'meteor-wrap' + (ctx ? ' playable' : '') });
   const cv = h('canvas', { class: 'meteor-cv', role: 'img', 'aria-label': ctx ? '우주 공간. 왼쪽 아래 조이스틱이나 방향키로 움직여요' : '운석 피하기 경기장 전체' });
   const banner = h('div', { class: 'meteor-banner', hidden: '' });
   const knob = h('div', { class: 'joy-knob' });
   const joy = h('div', { class: 'joy', 'aria-hidden': 'true' }, knob);
-  wrap.append(cv, banner);
-  if (ctx) wrap.append(joy);
+  const feedBox = h('div', { class: 'meteor-feed', 'aria-live': 'polite' });
+  wrap.append(cv, banner, feedBox);
+  // 조이스틱은 경기장 아래 왼쪽에 (경기장을 가리지 않게)
+  const effects = h('div', { class: 'meteor-effects' });
+  const joyRow = ctx ? h('div', { class: 'joy-row' }, joy, h('div', {}, h('small', { text: '조이스틱을 밀어서 움직여요 · 컴퓨터는 방향키' }), effects)) : null;
+  const legend = h('div', { class: 'item-legend' });
   const scoreBox = h('div', { class: 'meteor-score' });
   const tk = ctx ? techking(TIPS.meteor) : null;
   const g = cv.getContext('2d');
 
-  let W = 170, H = 120, PR = 2.4, RR = 7, SPEED = 30;
-  let meteors = [], seed = null, goAt = 0, offset = -Infinity, lastS = null, lastMe = null, roster = [];
+  let W = 130, H = 130, PR = 2.8, RR = 7, SPEED = 30;
+  let meteors = [], items = [], seed = null, goAt = 0, offset = -Infinity, lastS = null, lastMe = null, roster = [];
+  let taken = new Set();
+  const requested = new Set();
+  let fastLocal = 0, tinyLocal = 0, frozenLocal = 0, FASTK = 1.6, ITEM_R = 3.4;
   const others = new Map();
   const imgs = {};
-  let myX = 85, myY = 60, tgtX = 85, tgtY = 60, placed = false, hitAt = 0, shieldLocal = 0, lastSent = 0, sentX = -1, sentY = -1;
+  let myX = 65, myY = 65, tgtX = 65, tgtY = 65, placed = false, hitAt = 0, shieldLocal = 0, lastSent = 0, sentX = -1, sentY = -1;
   let camX = 0, camY = 0;
   const keys = new Set();
-  const stars = Array.from({ length: 260 }, (_, i) => ({ x: (i * 37.7) % 170, y: (i * 53.3) % 120, r: (i % 3) * 0.12 + 0.12, p: i }));
+  const stars = Array.from({ length: 200 }, (_, i) => ({ x: (i * 37.7) % 130, y: (i * 53.3) % 130, r: (i % 3) * 0.12 + 0.12, p: i }));
 
   function img(team) {
     const src = MASCOT[team];
@@ -447,7 +453,7 @@ function meteorGame(ctx) {
     wrap.addEventListener('pointerdown', e => { e.preventDefault(); drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
     wrap.addEventListener('pointermove', e => {
       if (!drag || e.pointerId !== drag.id) return;
-      const k = VIEW_W / cv.clientWidth * 1.15;
+      const k = W / cv.clientWidth * 1.15;
       tgtX = Math.max(0, Math.min(W, tgtX + (e.clientX - drag.x) * k));
       tgtY = Math.max(0, Math.min(H, tgtY + (e.clientY - drag.y) * k));
       drag.x = e.clientX; drag.y = e.clientY;
@@ -459,7 +465,7 @@ function meteorGame(ctx) {
     document.addEventListener('keydown', kd); document.addEventListener('keyup', ku);
   }
 
-  function viewSize() { return ctx ? { vw: VIEW_W, vh: VIEW_H } : { vw: W, vh: H }; }
+  function viewSize() { return { vw: W, vh: H }; } // 학생·선생님 모두 우주 전체
   function resize() {
     const { vw, vh } = viewSize();
     const dpr = Math.min(2, window.devicePixelRatio || 1), cw = cv.clientWidth || 340, ch = cw * vh / vw;
@@ -476,29 +482,39 @@ function meteorGame(ctx) {
     const tau = (serverNow() - goAt) / 1000;
     const playing = lastS.phase === 'playing';
     const meDown = lastMe ? (lastMe.down || Date.now() - hitAt < 700) : false;
-    if (ctx && lastMe && playing && !meDown) {
+    const nowMs = Date.now(), frozen = nowMs < frozenLocal, speed = SPEED * (nowMs < fastLocal ? FASTK : 1);
+    const myR = PR * (nowMs < tinyLocal ? 0.5 : 1);
+    if (ctx && lastMe && playing && !meDown && frozen) { tgtX = myX; tgtY = myY; }
+    if (ctx && lastMe && playing && !meDown && !frozen) {
       let vx = joyVec.x, vy = joyVec.y;
       if (keys.has('ArrowLeft') || keys.has('KeyA')) vx -= 1; if (keys.has('ArrowRight') || keys.has('KeyD')) vx += 1;
       if (keys.has('ArrowUp') || keys.has('KeyW')) vy -= 1; if (keys.has('ArrowDown') || keys.has('KeyS')) vy += 1;
       const mag = Math.hypot(vx, vy);
       if (mag > 0.12) {
         const m = Math.pow(Math.min(1, mag), 1.6); // 조금만 밀면 천천히, 끝까지 밀어야 최고 속도
-        myX = Math.max(0, Math.min(W, myX + vx / mag * m * SPEED * dt));
-        myY = Math.max(0, Math.min(H, myY + vy / mag * m * SPEED * dt));
+        myX = Math.max(0, Math.min(W, myX + vx / mag * m * speed * dt));
+        myY = Math.max(0, Math.min(H, myY + vy / mag * m * speed * dt));
         tgtX = myX; tgtY = myY;
       } else {
-        const dx = tgtX - myX, dy = tgtY - myY, d = Math.hypot(dx, dy), step = SPEED * dt;
+        const dx = tgtX - myX, dy = tgtY - myY, d = Math.hypot(dx, dy), step = speed * dt;
         if (d <= step) { myX = tgtX; myY = tgtY; } else { myX += dx / d * step; myY += dy / d * step; }
       }
       if (Date.now() > shieldLocal) {
         for (const m of meteors) {
           const a = tau - m.t0;
           if (a < 0 || a > m.life) continue;
-          if (Math.hypot(m.x + m.vx * a - myX, m.y + m.vy * a - myY) < m.r + PR * 0.85) {
+          if (Math.hypot(m.x + m.vx * a - myX, m.y + m.vy * a - myY) < m.r + myR * 0.85) {
             hitAt = Date.now(); ctx.act('hit'); if (navigator.vibrate) navigator.vibrate(120); break;
           }
         }
       }
+      // 아이템 줍기
+      items.forEach((it, i) => {
+        if (taken.has(i) || requested.has(i)) return;
+        const a = tau - it.t0;
+        if (a < 0 || a > it.life) return;
+        if (Math.hypot(it.x - myX, it.y - myY) < myR + ITEM_R) { requested.add(i); ctx.act('item', { i }); if (navigator.vibrate) navigator.vibrate(30); }
+      });
       if (now - lastSent > 130 && (Math.abs(myX - sentX) > 0.05 || Math.abs(myY - sentY) > 0.05)) {
         lastSent = now; sentX = myX; sentY = myY; ctx.act('pos', { x: myX, y: myY });
       }
@@ -510,10 +526,7 @@ function meteorGame(ctx) {
   function draw(tau) {
     const k = resize(), w = cv.width, hgt = cv.height, { vw, vh } = viewSize();
     // 카메라: 내 캐릭터를 가운데에 (맵 끝에서는 멈춰요)
-    if (ctx) {
-      camX += (Math.max(0, Math.min(W - vw, myX - vw / 2)) - camX) * 0.25;
-      camY += (Math.max(0, Math.min(H - vh, myY - vh / 2)) - camY) * 0.25;
-    } else { camX = 0; camY = 0; }
+    camX = 0; camY = 0; // 한 화면에 전체를 보여줘요
     const SX = x => (x - camX) * k, SY = y => (y - camY) * k;
     g.fillStyle = '#070a1e'; g.fillRect(0, 0, w, hgt);
     const bg = g.createRadialGradient(SX(W / 2), SY(H / 2), 10, SX(W / 2), SY(H / 2), W * k * 0.7);
@@ -536,13 +549,15 @@ function meteorGame(ctx) {
       const wx = m.x + m.vx * a, wy = m.y + m.vy * a;
       if (wx < camX - 12 || wy < camY - 12 || wx > camX + vw + 12 || wy > camY + vh + 12) continue;
       const x = SX(wx), y = SY(wy), r = m.r * k, sp = Math.hypot(m.vx, m.vy);
-      const tx = x - (m.vx / sp) * r * 3.2, ty = y - (m.vy / sp) * r * 3.2;
+      const tl = r * (m.kind === 'fast' ? 7 : m.kind === 'slow' ? 1.6 : 3.2); // 빠를수록 꼬리가 길어요
+      const tx = x - (m.vx / sp) * tl, ty = y - (m.vy / sp) * tl;
       const tr = g.createLinearGradient(x, y, tx, ty);
-      tr.addColorStop(0, 'rgba(255,170,60,.85)'); tr.addColorStop(1, 'rgba(255,90,30,0)');
+      if (m.kind === 'fast') { tr.addColorStop(0, 'rgba(255,255,200,.95)'); tr.addColorStop(0.3, 'rgba(255,190,60,.8)'); tr.addColorStop(1, 'rgba(255,90,30,0)'); }
+      else { tr.addColorStop(0, 'rgba(255,170,60,.8)'); tr.addColorStop(1, 'rgba(255,90,30,0)'); }
       g.strokeStyle = tr; g.lineWidth = r * 1.3; g.lineCap = 'round';
       g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
       g.save(); g.translate(x, y); g.rotate(a * m.spin);
-      g.fillStyle = '#8d7966'; g.strokeStyle = '#2a1e14'; g.lineWidth = Math.max(1.5, k * 0.35);
+      g.fillStyle = m.kind === 'slow' ? '#6f6a66' : m.kind === 'fast' ? '#c98a4b' : '#8d7966'; g.strokeStyle = '#2a1e14'; g.lineWidth = Math.max(1.5, k * 0.35);
       g.beginPath();
       for (let i = 0; i < 8; i++) { const ang = i / 8 * Math.PI * 2, rr = r * (0.82 + ((i * 7) % 3) * 0.09); g.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr); }
       g.closePath(); g.fill(); g.stroke();
@@ -550,43 +565,41 @@ function meteorGame(ctx) {
       g.beginPath(); g.arc(-r * 0.3, -r * 0.2, r * 0.22, 0, 7); g.arc(r * 0.3, r * 0.25, r * 0.16, 0, 7); g.fill();
       g.restore();
     }
+    // 아이템
+    items.forEach((it, i) => {
+      if (taken.has(i) || requested.has(i)) return;
+      const a = tau - it.t0;
+      if (a < 0 || a > it.life) return;
+      if (it.life - a < 2 && Math.floor(a * 6) % 2) return; // 사라지기 전 깜빡깜빡
+      const x = SX(it.x), y = SY(it.y + Math.sin(tau * 3 + i) * 0.8), r = ITEM_R * k;
+      const glow = g.createRadialGradient(x, y, r * 0.2, x, y, r * 1.7);
+      glow.addColorStop(0, 'rgba(255,240,150,.9)'); glow.addColorStop(1, 'rgba(255,240,150,0)');
+      g.fillStyle = glow; g.beginPath(); g.arc(x, y, r * 1.7, 0, 7); g.fill();
+      g.fillStyle = '#fff'; g.strokeStyle = '#ffe11a'; g.lineWidth = Math.max(2, k * 0.5);
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke();
+      g.font = `${Math.round(r * 1.25)}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(Eng ? Eng.ITEM_KINDS[it.kind].icon : '?', x, y + r * 0.08);
+    });
     const css = getComputedStyle(document.documentElement);
     const col = { red: css.getPropertyValue('--red').trim() || '#ff4d4d', blue: css.getPropertyValue('--blue').trim() || '#2f7bff' };
     const names = new Map(roster.map(p => [p.id, p.name]));
     for (const [id, o] of others) {
       o.x += (o.tx - o.x) * 0.3; o.y += (o.ty - o.y) * 0.3;
       if (lastMe && id === lastMe.id) continue;
-      drawPlayer(SX(o.x), SY(o.y), PR * k, o.team, o.down, o.rev, o.shield, initial(names.get(id)), false, col, k);
+      drawPlayer(SX(o.x), SY(o.y), PR * k * (o.tiny ? 0.55 : 1), o.team, o.down, o.rev, o.shield, initial(names.get(id)), false, col, k, o.fast, o.frozen);
     }
     if (ctx && lastMe) {
       const meDown = lastMe.down || Date.now() - hitAt < 700;
-      drawPlayer(SX(myX), SY(myY), PR * k * 1.25, lastMe.team, meDown, (others.get(lastMe.id) || {}).rev || 0, Date.now() < shieldLocal, '', true, col, k);
-      drawMinimap(col);
+      const nm = Date.now();
+      drawPlayer(SX(myX), SY(myY), PR * k * 1.25 * (nm < tinyLocal ? 0.55 : 1), lastMe.team, meDown, (others.get(lastMe.id) || {}).rev || 0, nm < shieldLocal, '', true, col, k, nm < fastLocal, nm < frozenLocal);
     }
   }
 
-  // 🗺 오른쪽 위 작은 지도: 전체 우주와 친구들 위치 (쓰러진 우리 팀은 ✕)
-  function drawMinimap(col) {
-    const w = cv.width, mw = w * 0.3, mh = mw * H / W, x0 = w - mw - w * 0.025, y0 = w * 0.025, s = mw / W;
+  function drawPlayer(x, y, r, team, down, rev, shield, label, isMe, col, k, fast, frozen) {
     g.save();
-    g.fillStyle = 'rgba(5,8,25,.72)'; g.fillRect(x0, y0, mw, mh);
-    g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 1.5; g.strokeRect(x0, y0, mw, mh);
-    g.strokeStyle = 'rgba(255,225,26,.9)'; g.strokeRect(x0 + camX * s, y0 + camY * s, VIEW_W * s, VIEW_H * s);
-    for (const [id, o] of others) {
-      if (lastMe && id === lastMe.id) continue;
-      const px = x0 + o.x * s, py = y0 + o.y * s;
-      if (o.down) {
-        if (lastMe && o.team === lastMe.team) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 3, py - 3); g.lineTo(px + 3, py + 3); g.moveTo(px + 3, py - 3); g.lineTo(px - 3, py + 3); g.stroke(); }
-        continue;
-      }
-      g.fillStyle = col[o.team]; g.beginPath(); g.arc(px, py, 2.4, 0, 7); g.fill();
+    if (!down && fast) { // ⚡ 번개: 노란 잔상
+      g.fillStyle = 'rgba(255,225,26,.45)'; g.beginPath(); g.arc(x, y, r * 1.7, 0, 7); g.fill();
     }
-    if (lastMe) { g.fillStyle = '#ffe11a'; g.strokeStyle = '#000'; g.lineWidth = 1; g.beginPath(); g.arc(x0 + myX * s, y0 + myY * s, 3.6, 0, 7); g.fill(); g.stroke(); }
-    g.restore();
-  }
-
-  function drawPlayer(x, y, r, team, down, rev, shield, label, isMe, col, k) {
-    g.save();
     if (down) {
       g.strokeStyle = 'rgba(255,255,255,.35)'; g.setLineDash([k * 0.8, k * 0.8]); g.lineWidth = Math.max(1, k * 0.25);
       g.beginPath(); g.arc(x, y, RR * k, 0, 7); g.stroke(); g.setLineDash([]);
@@ -607,37 +620,56 @@ function meteorGame(ctx) {
         g.fillStyle = '#fff'; g.font = `${Math.round(r * 1.1)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
         g.fillText(label, x, y + r * 0.05);
       }
+      if (frozen) { // ❄️ 얼음: 얼음 상자
+        g.fillStyle = 'rgba(180,230,255,.6)'; g.strokeStyle = '#e6f8ff'; g.lineWidth = Math.max(1.5, k * 0.35);
+        g.beginPath(); g.rect(x - r * 1.45, y - r * 1.45, r * 2.9, r * 2.9); g.fill(); g.stroke();
+      }
       if (shield) { g.strokeStyle = 'rgba(160,230,255,.9)'; g.setLineDash([k * 0.6, k * 0.5]); g.lineWidth = Math.max(1.5, k * 0.35); g.beginPath(); g.arc(x, y, r + k * 1.1, 0, 7); g.stroke(); }
     }
     g.restore();
   }
 
   return {
-    root: h('div', {}, scoreBox, wrap, tk && tk.root),
+    root: h('div', {}, scoreBox, wrap, joyRow, legend, tk && tk.root),
     update(s, me, rs) {
       lastS = s; lastMe = me; roster = rs || roster;
       const M = s.meteor;
       W = M.w; H = M.h; PR = M.pr; RR = M.reviveR; goAt = M.goAt; SPEED = M.speed || SPEED;
       offset = Math.max(offset, M.now - Date.now());
-      if (M.seed !== seed && Eng) { seed = M.seed; meteors = Eng.makeMeteors(seed); }
+      if (M.seed !== seed && Eng) { seed = M.seed; meteors = Eng.makeMeteors(seed); items = Eng.makeItems(seed); requested.clear(); }
+      taken = new Set(M.taken || []);
+      FASTK = M.fast || FASTK; ITEM_R = M.itemR || ITEM_R;
+      for (const i of [...requested]) if (taken.has(i)) requested.delete(i); // 다른 친구가 먼저 주웠으면 정리
+      // 아이템 소식
+      const FEED = { shield: f => `🛡️ ${f.name} 보호막!`, bolt: f => `⚡ ${f.name} 번개! 슝슝`, heart: f => `💖 ${f.name} 단체 부활!${f.extra}`,
+        ice: f => `❄️ ${f.name} 얼음! ${TEAM_KO[f.team === 'red' ? 'blue' : 'red']} 꽁꽁`, star: f => `⭐ ${f.name} 별! ${TEAM_KO[f.team]} +20점`, mush: f => `🍄 ${f.name} 꼬마버섯!` };
+      setOnce(feedBox, (M.feed || []).map(f => f.name + f.kind + Math.floor(f.ago / 3000)).join() + teamsStamp, () =>
+        (M.feed || []).slice(-3).map(f => h('div', { class: `feed-item t-${f.team}`, text: (FEED[f.kind] || (() => ''))(f) })));
+      if (Eng && !legend.childNodes.length) legend.append(...Object.values(Eng.ITEM_KINDS).map(it => h('span', { class: 'legend-chip', title: it.desc }, it.icon, ' ', it.name)));
       const seen = new Set();
-      for (const [id, x, y, team, down, rev, shield] of M.pos) {
+      for (const [id, x, y, team, down, rev, shield, fast, tiny, frozen] of M.pos) {
         seen.add(id);
         const o = others.get(id) || { x, y };
-        Object.assign(o, { tx: x, ty: y, team, down, rev, shield });
+        Object.assign(o, { tx: x, ty: y, team, down, rev, shield, fast, tiny, frozen });
         others.set(id, o);
       }
       for (const id of [...others.keys()]) if (!seen.has(id)) others.delete(id);
       if (me) {
         if (!placed || me.down) {
           myX = tgtX = me.x; myY = tgtY = me.y;
-          if (!placed) { camX = Math.max(0, Math.min(W - VIEW_W, myX - VIEW_W / 2)); camY = Math.max(0, Math.min(H - VIEW_H, myY - VIEW_H / 2)); }
           placed = true;
         }
         shieldLocal = Date.now() + (me.shield || 0);
+        fastLocal = Date.now() + (me.fast || 0); tinyLocal = Date.now() + (me.tiny || 0); frozenLocal = Date.now() + (me.frozen || 0);
+        const chips = [];
+        if (me.shield > 0 && !me.down) chips.push(`🛡️ ${Math.ceil(me.shield / 1000)}초`);
+        if (me.fast > 0) chips.push(`⚡ ${Math.ceil(me.fast / 1000)}초`);
+        if (me.tiny > 0) chips.push(`🍄 ${Math.ceil(me.tiny / 1000)}초`);
+        if (me.frozen > 0) chips.push(`❄️ ${Math.ceil(me.frozen / 1000)}초`);
+        effects.textContent = chips.join('  ');
         if (!me.down && Date.now() - hitAt > 700) hitAt = 0;
-        banner.hidden = !me.down;
-        banner.textContent = '쾅! 쓰러졌어요. 팀원이 옆에 오면 부활해요';
+        banner.hidden = !(me.down || me.frozen > 0);
+        banner.textContent = me.down ? '쾅! 쓰러졌어요. 팀원이 옆에 오면 부활해요' : '❄️ 꽁꽁 얼었어요! 잠깐 못 움직여요';
       }
       setOnce(scoreBox, JSON.stringify(M.score) + JSON.stringify(M.alive) + JSON.stringify(s.counts) + teamsStamp, () => ['red', 'blue'].map(t =>
         h('div', { class: `meteor-team t-${t}` }, teamTag(t), h('b', { text: `${M.score[t]}점` }), h('small', { text: `생존 ${M.alive[t]}/${s.counts[t]}` }))));
