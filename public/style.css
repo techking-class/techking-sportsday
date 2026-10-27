@@ -458,3 +458,14 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .meteor-effects { font-size: 1.05rem; min-height: 1.5em; margin-top: 4px; }
 .item-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; justify-content: center; }
 .legend-chip { border: 2px solid var(--ink); border-radius: var(--wob); padding: 1px 8px; background: var(--paper); font-size: .85rem; cursor: help; }
+
+/* 조이스틱을 경기장 안 왼쪽 아래에 (반투명) */
+.meteor-wrap .joy { position: absolute; left: 10px; bottom: 10px; width: 104px; height: 104px; z-index: 3;
+  background: rgba(255,255,255,.14); border: 3px solid rgba(255,255,255,.7); box-shadow: none; }
+.meteor-wrap .joy::after { border-color: rgba(255,255,255,.4); }
+.meteor-wrap .joy.on { background: rgba(255,255,255,.26); }
+.meteor-wrap .joy-knob { opacity: .92; }
+@media (min-width: 700px) { .meteor-wrap .joy { width: 124px; height: 124px; } }
+.joy-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+/* 아이템 소식은 위쪽에 (조이스틱과 안 겹치게) */
+.meteor-feed { top: 46px; bottom: auto; }

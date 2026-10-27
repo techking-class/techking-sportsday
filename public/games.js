@@ -396,7 +396,7 @@ function flipGame(ctx) {
   };
 }
 
-/* ⑦ 운석 피하기 — 우주 전체가 한 화면에 보이고, 아래 왼쪽 조이스틱으로 움직여요 */
+/* ⑦ 운석 피하기 — 우주 전체가 한 화면에 보이고, 화면 안 왼쪽 아래 조이스틱으로 움직여요 */
 function meteorGame(ctx) {
   const Eng = (typeof TechkingEngine !== 'undefined') ? TechkingEngine : null;
   const wrap = h('div', { class: 'meteor-wrap' + (ctx ? ' playable' : '') });
@@ -406,9 +406,9 @@ function meteorGame(ctx) {
   const joy = h('div', { class: 'joy', 'aria-hidden': 'true' }, knob);
   const feedBox = h('div', { class: 'meteor-feed', 'aria-live': 'polite' });
   wrap.append(cv, banner, feedBox);
-  // 조이스틱은 경기장 아래 왼쪽에 (경기장을 가리지 않게)
+  if (ctx) wrap.append(joy); // 🕹 조이스틱: 경기장 안 왼쪽 아래
   const effects = h('div', { class: 'meteor-effects' });
-  const joyRow = ctx ? h('div', { class: 'joy-row' }, joy, h('div', {}, h('small', { text: '조이스틱을 밀어서 움직여요 · 컴퓨터는 방향키' }), effects)) : null;
+  const joyRow = ctx ? h('div', { class: 'joy-row' }, h('small', { text: '왼쪽 아래 조이스틱을 밀어서 움직여요 · 컴퓨터는 방향키' }), effects) : null;
   const legend = h('div', { class: 'item-legend' });
   const scoreBox = h('div', { class: 'meteor-score' });
   const tk = ctx ? techking(TIPS.meteor) : null;
