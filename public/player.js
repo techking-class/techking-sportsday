@@ -67,6 +67,11 @@ function start() {
 }
 
 function onMsg(msg) {
+  if (msg.kicked) { // 선생님이 내보냈어요
+    myId = null; store.set('tk_id', null); showJoin();
+    document.getElementById('joinError').textContent = '선생님이 게임에서 내보냈어요. 다시 참가하려면 이름을 쓰고 참가하기를 눌러요.';
+    return;
+  }
   if (msg.roster) roster = msg.roster;
   if (msg.teams) { applyTeams(msg.teams); drawHero(); }
   if (msg.me === null) { myId = null; store.set('tk_id', null); showJoin(); return; }

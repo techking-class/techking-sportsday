@@ -137,6 +137,13 @@ function api(route, body, res) {
       case 'lobby': engine.toLobby(); break;
       case 'shuffle': engine.shuffleTeams(); break;
       case 'move': engine.moveTeam(body.id); break;
+      case 'kick': {
+        // 내보내기: 그 학생 화면에 알리고 연결을 끊어요 (다시 참가는 가능)
+        if (engine.kick(body.id)) {
+          for (const c of [...clients]) if (c.playerId === body.id) { try { c.res.write('data: {"kicked":true}\n\n'); c.res.end(); } catch (e) {} clients.delete(c); }
+        }
+        break;
+      }
       case 'clean': engine.removeOffline(); break;
       case 'resetScores': engine.resetScores(); break;
       case 'teams': saveTeams(body.teams); break;

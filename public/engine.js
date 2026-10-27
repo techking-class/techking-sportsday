@@ -13,9 +13,9 @@
 
   const EVENT_NAMES = {
     tug: '전략 줄다리기', land: '땅따먹기', relay: '이어달리기', zone: '거점 점령전',
-    nunchi: '눈치게임', flip: '판뒤집기', meteor: '운석 피하기', rps: '단체 가위바위보',
+    flip: '판뒤집기', meteor: '운석 피하기', rps: '단체 가위바위보', bak: '박 터트리기',
   };
-  const DURATION = { tug: 60, land: 60, relay: 150, zone: 90, nunchi: 90, flip: 45, meteor: 60, rps: 120 }; // 초
+  const DURATION = { tug: 60, land: 60, relay: 150, zone: 90, flip: 45, meteor: 60, rps: 120, bak: 90 }; // 초
   const TEAMS = ['red', 'blue'];
 
   const ROPES = 5;            // 줄 개수
@@ -27,12 +27,13 @@
     r: 8, speed: 1.8, goal: 100,
     points: [{ x: 22, y: 15 }, { x: 78, y: 15 }, { x: 50, y: 30 }, { x: 22, y: 45 }, { x: 78, y: 45 }],
   };
-  const NUNCHI = { rounds: 3, roundMs: 20000, breakMs: 3500, windowMs: 450 };
+  // 박 터트리기: 주머니를 던져 우리 팀 박을 맞히면 게이지가 차요. 60이 차면 박이 터져요!
+  const BAK = { goal: 60, throwCool: 380, burstShowMs: 2600 };
   // 단체 가위바위보: 팀원이 가장 많이 낸 손이 팀의 손! 3판 먼저 이기면 승리
   const RPS = { pickMs: 7000, revealMs: 3500, win: 3, maxRounds: 9 };
   const BEATS = { r: 's', s: 'p', p: 'r' }; // 바위>가위, 가위>보, 보>바위
-  // 운석 피하기: 우주 공간 가로 100 × 세로 70
-  const METEOR = { w: 100, h: 70, pr: 2.4, speed: 42, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
+  // 운석 피하기: 넓은 우주 공간 가로 170 × 세로 120 (화면은 내 주변만 보여주고 따라다녀요)
+  const METEOR = { w: 170, h: 120, pr: 2.4, speed: 48, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
 
   // 모든 화면이 같은 순서·같은 시간에 같은 운석을 보도록, 같은 '씨앗(seed)'으로 운석 목록을 계산해요
   function mulberry32(a) {
@@ -48,7 +49,7 @@
     let t = 1.5;
     while (t < durSec) {
       const prog = t / durSec;
-      t += -Math.log(1 - R()) / (0.9 + 4.6 * prog); // 시간이 갈수록 많아져요
+      t += -Math.log(1 - R()) / ((0.9 + 4.6 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
       const edge = Math.floor(R() * 4);
       let x, y;
       if (edge === 0) { x = R() * W; y = -m; } else if (edge === 1) { x = W + m; y = R() * H; }
@@ -97,6 +98,7 @@
       p.stamina = 100; p.exhausted = false; p.lastTapAt = 0; p.cellAt = 0;
       p.tokens = 14; p.tokenAt = t; p.rope = 0; p.ropeAt = 0;
       p.down = false; p.rev = 0; p.shieldUntil = 0; p.posAt = t; p.hits = 0;
+      p.throwAt = 0; p.bakHits = 0;
       p.x = p.team === 'red' ? 6 : 94; p.y = 30; p.tx = p.x; p.ty = p.y;
     }
     function addPlayer(name, team, extra) {
@@ -153,15 +155,12 @@
           list.forEach((p, k) => { p.x = p.tx = team === 'red' ? 5 : 95; p.y = p.ty = 6 + (k + 0.5) * (48 / list.length); });
         }
       }
-      if (ev === 'nunchi') {
-        game.endAt = Infinity;
-        game.nunchi = { round: 0, rounds: NUNCHI.rounds, state: 'break', breakUntil: goAt, k: 1, window: null, log: [], pts: { red: 0, blue: 0 }, done: {}, roundEndAt: 0 };
-      }
       if (ev === 'flip') {
         const n = flipSize();
         const cells = shuffle(Array.from({ length: n * n }, (_, i) => (i % 2 ? 'red' : 'blue')));
         game.flip = { n, cells, flips: Array(n * n).fill(0) };
       }
+      if (ev === 'bak') game.bak = { gauge: { red: 0, blue: 0 }, hits: { red: 0, blue: 0 }, burst: null, burstAt: 0 };
       if (ev === 'rps') {
         game.endAt = Infinity;
         game.rps = { round: 0, state: 'reveal', revealUntil: goAt, picks: {}, wins: { red: 0, blue: 0 }, log: [], roundStart: 0, roundEndAt: 0, over: false };
@@ -171,7 +170,7 @@
         for (const team of TEAMS) {
           const list = members(team);
           list.forEach((p, k) => {
-            p.x = team === 'red' ? 30 : 70; p.y = 8 + (k + 0.5) * (54 / list.length);
+            p.x = METEOR.w / 2 + (team === 'red' ? -18 : 18); p.y = METEOR.h / 2 - 25 + (k + 0.5) * (50 / list.length);
             p.shieldUntil = goAt + METEOR.shieldMs; p.posAt = goAt;
           });
         }
@@ -210,9 +209,9 @@
       } else if (ev === 'zone') {
         const s = game.zone.score;
         finish(pick(s.red, s.blue), `시간 종료! ${R} ${s.red}점 : ${B} ${s.blue}점`);
-      } else if (ev === 'nunchi') {
-        const s = game.nunchi.pts;
-        finish(pick(r1(s.red), r1(s.blue)), `${R} ${fmt(r1(s.red))}점 : ${B} ${fmt(r1(s.blue))}점`);
+      } else if (ev === 'bak') {
+        const gg = game.bak.gauge;
+        finish(pick(r1(gg.red), r1(gg.blue)), `시간 종료! 박 게이지 ${R} ${Math.round(gg.red / BAK.goal * 100)}% : ${B} ${Math.round(gg.blue / BAK.goal * 100)}%`);
       } else if (ev === 'rps') {
         const w = game.rps.wins;
         finish(pick(w.red, w.blue), `${R} ${w.red}승 : ${B} ${w.blue}승`);
@@ -360,40 +359,6 @@
       }
     }
 
-    /* ---------- ⑤ 눈치게임 ---------- */
-    function nunchiCall(p, t) {
-      const N = game.nunchi;
-      if (N.state !== 'play' || N.done[p.id]) return;
-      N.done[p.id] = true;
-      if (!N.window) N.window = { k: N.k, at: t, ids: [] };
-      N.window.ids.push(p.id);
-    }
-    function tickNunchi(t) {
-      const N = game.nunchi;
-      if (N.state === 'break') {
-        if (t >= N.breakUntil) { N.round++; N.state = 'play'; N.k = 1; N.window = null; N.done = {}; N.log = []; N.roundEndAt = t + NUNCHI.roundMs; }
-        return;
-      }
-      if (N.window && t - N.window.at >= NUNCHI.windowMs) {
-        const ps = N.window.ids.map(id => players.get(id)).filter(Boolean);
-        // ⚖ 점수에 인원 보정 가중치를 곱해요
-        if (ps.length === 1) N.pts[ps[0].team] += weight(ps[0].team);
-        else ps.forEach(p => { N.pts[p.team] -= weight(p.team); });
-        N.log.push({ k: N.window.k, ok: ps.length === 1, names: ps.map(p => p.name), teams: ps.map(p => p.team) });
-        N.k++; N.window = null;
-      }
-      if (N.window) return;
-      const left = all().filter(p => !N.done[p.id]);
-      if (left.length <= 1 || t >= N.roundEndAt) {
-        if (left.length && all().length > 1) {
-          left.forEach(p => { N.pts[p.team] -= weight(p.team); });
-          N.log.push({ last: true, names: left.map(p => p.name), teams: left.map(p => p.team) });
-        }
-        if (N.round >= N.rounds) finishByTime();
-        else { N.state = 'break'; N.breakUntil = t + NUNCHI.breakMs; }
-      }
-    }
-
     /* ---------- ⑥ 판뒤집기 ---------- */
     function flipCount() { const c = { red: 0, blue: 0 }; for (const x of game.flip.cells) c[x]++; return c; }
     function flipHit(p, i, t) {
@@ -404,6 +369,22 @@
       F.cells[i] = p.team;
       F.flips[i]++;
       return true;
+    }
+
+    /* ---------- ⑨ 박 터트리기 ---------- */
+    // 주머니가 박에 맞았는지는 각자 휴대폰이 판단해서 알려줘요. 서버는 너무 빠른 연속 보고만 막아요.
+    function bakHit(p, t) {
+      const G = game.bak;
+      if (G.burst || t - p.throwAt < BAK.throwCool) return;
+      p.throwAt = t; p.bakHits++;
+      G.hits[p.team]++;
+      G.gauge[p.team] += weight(p.team); // ⚖ 인원이 적은 팀은 한 번 맞힐 때 게이지가 더 많이 차요
+      if (G.gauge[p.team] >= BAK.goal) { G.gauge[p.team] = BAK.goal; G.burst = p.team; G.burstAt = t; }
+    }
+    function tickBak(t) {
+      const G = game.bak;
+      // 박이 터지는 모습을 모두가 볼 수 있게 잠깐 기다렸다가 끝내요
+      if (G.burst && t - G.burstAt >= BAK.burstShowMs) finish(G.burst, `${iga(TEAM_KO[G.burst])} 박을 먼저 터뜨렸어요!`);
     }
 
     /* ---------- ⑧ 단체 가위바위보 ---------- */
@@ -493,9 +474,9 @@
           else if (type === 'baton') relayBaton(p, t);
           break;
         case 'zone': if (type === 'move') zoneMove(p, d.x, d.y); break;
-        case 'nunchi': if (type === 'call') nunchiCall(p, t); break;
         case 'flip': if (type === 'cell') return flipHit(p, d.i, t); break;
         case 'rps': if (type === 'pick') rpsPick(p, d.c, t); break;
+        case 'bak': if (type === 'hit') bakHit(p, t); break;
         case 'meteor': if (type === 'pos') meteorPos(p, d.x, d.y, t); else if (type === 'hit') meteorHit(p, t); break;
       }
       return true;
@@ -508,9 +489,9 @@
       if (game.event === 'tug') tickTug(t);
       else if (game.event === 'relay') tickRelay(t);
       else if (game.event === 'zone') tickZone(t);
-      else if (game.event === 'nunchi') tickNunchi(t);
       else if (game.event === 'meteor') tickMeteor(t);
       else if (game.event === 'rps') tickRps(t);
+      else if (game.event === 'bak') tickBak(t);
       if (game.phase === 'playing' && t >= game.endAt) finishByTime();
     }
 
@@ -559,15 +540,9 @@
           pos: list.map(p => [p.id, r1(p.x), r1(p.y), p.team]),
         };
       }
-      if (ev === 'nunchi' && game.nunchi) {
-        const N = game.nunchi;
-        s.nunchi = {
-          round: N.round, rounds: N.rounds, k: N.k, state: N.state, log: N.log.slice(-8),
-          pts: { red: r1(N.pts.red), blue: r1(N.pts.blue) },
-          left: list.filter(p => !N.done[p.id]).length,
-          breakLeft: N.state === 'break' ? Math.max(1, Math.ceil((N.breakUntil - t) / 1000)) : 0,
-        };
-        if (game.phase === 'playing') s.timeLeft = N.state === 'play' ? Math.max(0, Math.ceil((N.roundEndAt - t) / 1000)) : 0;
+      if (ev === 'bak' && game.bak) {
+        const G = game.bak;
+        s.bak = { goal: BAK.goal, gauge: { red: r1(G.gauge.red), blue: r1(G.gauge.blue) }, hits: G.hits, burst: G.burst, cool: BAK.throwCool };
       }
       if (ev === 'rps' && game.rps) {
         const G = game.rps;
@@ -580,7 +555,7 @@
       if (ev === 'meteor' && game.meteor) {
         const M = game.meteor;
         s.meteor = {
-          seed: M.seed, goAt: game.goAt, now: t, w: METEOR.w, h: METEOR.h, pr: METEOR.pr, reviveR: METEOR.reviveR,
+          seed: M.seed, goAt: game.goAt, now: t, w: METEOR.w, h: METEOR.h, pr: METEOR.pr, reviveR: METEOR.reviveR, speed: METEOR.speed,
           score: M.score, alive: { red: aliveCount('red'), blue: aliveCount('blue') },
           pos: list.map(p => [p.id, r1(p.x), r1(p.y), p.team, p.down ? 1 : 0, Math.round((p.rev / METEOR.reviveMs) * 100), t < p.shieldUntil ? 1 : 0]),
         };
@@ -603,6 +578,7 @@
       }
       if (ev === 'land') m.cool = Math.max(0, coolFor(p, LAND_COOL) - (t - p.cellAt));
       if (ev === 'flip') m.coolMs = coolFor(p, FLIP_COOL);
+      if (ev === 'bak') m.bakHits = p.bakHits;
       if (ev === 'rps' && game.rps) { m.pick = game.rps.picks[p.id] || null; m.teamVotes = teamVotes(p.team); } // 우리 팀 투표 현황은 우리 팀만 봐요
       if (ev === 'meteor') { m.x = r1(p.x); m.y = r1(p.y); m.down = p.down; m.shield = Math.max(0, p.shieldUntil - t); }
       if (ev === 'relay' && game.relay) {
@@ -612,14 +588,13 @@
         m.legLen = r.legLen; m.progress = r1(r.progress);
       }
       if (ev === 'zone') { m.tx = r1(p.tx); m.ty = r1(p.ty); }
-      if (ev === 'nunchi' && game.nunchi) m.done = !!game.nunchi.done[p.id];
       return m;
     }
 
     function roster() { return [...players.values()].map(p => ({ id: p.id, name: p.name, team: p.team, on: online(p) })); }
 
     return {
-      EVENT_NAMES, DURATION, TEAMS, TEAM_KO, ROPES, ZONE, NUNCHI, METEOR, RPS,
+      EVENT_NAMES, DURATION, TEAMS, TEAM_KO, ROPES, ZONE, METEOR, RPS, BAK,
       players,
       get game() { return game; },
       get scores() { return scores; },
@@ -640,6 +615,7 @@
         const p = players.get(id);
         if (p && game.phase !== 'playing') { p.team = p.team === 'red' ? 'blue' : 'red'; resetPlayer(p, now()); bump(); }
       },
+      kick(id) { if (players.delete(id)) { bump(); return true; } return false; },
       removeOffline() { for (const p of [...players.values()]) if (!online(p)) players.delete(p.id); bump(); },
       resetScores() { scores = { red: 0, blue: 0 }; history = []; bump(); },
     };

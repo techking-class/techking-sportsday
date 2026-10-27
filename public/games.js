@@ -4,7 +4,7 @@
  * ctx = { tap(종류), act(종류, 데이터) }
  */
 function createGameView(ev, ctx) {
-  const make = { tug: tugGame, land: landGame, relay: relayGame, zone: zoneGame, nunchi: nunchiGame, flip: flipGame, meteor: meteorGame, rps: rpsGame }[ev];
+  const make = { tug: tugGame, land: landGame, relay: relayGame, zone: zoneGame, flip: flipGame, meteor: meteorGame, rps: rpsGame, bak: bakGame }[ev];
   return make(ctx);
 }
 
@@ -346,51 +346,6 @@ function zoneGame(ctx) {
   };
 }
 
-/* ⑤ 눈치게임 */
-function nunchiGame(ctx) {
-  const round = h('div', { class: 'nunchi-round' });
-  const num = h('div', { class: 'nunchi-num' });
-  const sub = h('div', { class: 'nunchi-sub' });
-  const pts = h('div', { class: 'nunchi-pts' });
-  const log = h('ul', { class: 'nunchi-log' });
-  let btn = null, tk = null;
-  if (ctx) {
-    btn = h('button', { class: 'tap', type: 'button' });
-    btn.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      if (btn.disabled) return;
-      ctx.act('call');
-      if (navigator.vibrate) navigator.vibrate(15);
-    });
-    tk = techking(TIPS.nunchi);
-  }
-  return {
-    root: h('div', {}, round, h('div', { class: 'box nunchi-board' }, h('small', { text: '다음 숫자' }), num, sub), pts,
-      btn && h('div', { class: 'pad' }, btn), log, tk && tk.root),
-    update(s, me) {
-      const N = s.nunchi;
-      round.textContent = N.round ? `${N.round} / ${N.rounds} 라운드` : '곧 시작해요';
-      const brk = N.state === 'break';
-      num.textContent = brk ? '준비' : String(N.k);
-      sub.textContent = brk ? `${N.round + 1 > N.rounds ? '' : N.round + 1 + '라운드 '}${N.breakLeft}초 뒤 시작` : `아직 못 외친 사람 ${N.left}명`;
-      setOnce(pts, N.pts.red + ':' + N.pts.blue, () => [teamTag('red', `${N.pts.red}점`), teamTag('blue', `${N.pts.blue}점`)]);
-      log.replaceChildren(...N.log.slice().reverse().map(x => {
-        const who = x.names.map((n, i) => h('span', { class: `t-${x.teams[i]} who` }, n));
-        if (x.last) return h('li', { class: 'bad' }, '꼴찌 ', ...who, ' −1');
-        return h('li', { class: x.ok ? 'good' : 'bad' }, h('b', { text: String(x.k) }), ' ', ...who, x.ok ? ' +1' : ' 겹쳤다! −1');
-      }));
-      if (btn) {
-        const live = s.phase === 'playing' && !brk;
-        btn.className = `tap t-${me.team}`;
-        btn.disabled = !live || me.done;
-        btn.textContent = me.done ? '외쳤어!' : brk ? '준비…' : `${N.k}!`;
-        tk.who(me.team);
-        tk.say(me.done ? '외쳤다! 이번 라운드는 친구들을 지켜보자.' : TIPS.nunchi);
-      }
-    },
-  };
-}
-
 /* ⑥ 판뒤집기 */
 function flipGame(ctx) {
   const grid = h('div', { class: 'flip-grid' });
@@ -441,58 +396,75 @@ function flipGame(ctx) {
   };
 }
 
-/* ⑦ 운석 피하기 — 우주 공간 가로·세로 평면 */
+/* ⑦ 운석 피하기 — 넓은 우주 공간 (화면이 나를 따라다니고, 왼쪽 아래 조이스틱으로 움직여요) */
 function meteorGame(ctx) {
   const Eng = (typeof TechkingEngine !== 'undefined') ? TechkingEngine : null;
+  const VIEW_W = 100, VIEW_H = 78;                     // 학생 화면에 보이는 범위
   const wrap = h('div', { class: 'meteor-wrap' + (ctx ? ' playable' : '') });
-  const cv = h('canvas', { class: 'meteor-cv', role: 'img', 'aria-label': ctx ? '우주 공간. 드래그하거나 방향키로 움직여요' : '운석 피하기 경기장' });
+  const cv = h('canvas', { class: 'meteor-cv', role: 'img', 'aria-label': ctx ? '우주 공간. 왼쪽 아래 조이스틱이나 방향키로 움직여요' : '운석 피하기 경기장 전체' });
   const banner = h('div', { class: 'meteor-banner', hidden: '' });
+  const knob = h('div', { class: 'joy-knob' });
+  const joy = h('div', { class: 'joy', 'aria-hidden': 'true' }, knob);
   wrap.append(cv, banner);
+  if (ctx) wrap.append(joy);
   const scoreBox = h('div', { class: 'meteor-score' });
   const tk = ctx ? techking(TIPS.meteor) : null;
   const g = cv.getContext('2d');
 
-  let W = 100, H = 70, PR = 2.4, RR = 7;
+  let W = 170, H = 120, PR = 2.4, RR = 7, SPEED = 48;
   let meteors = [], seed = null, goAt = 0, offset = -Infinity, lastS = null, lastMe = null, roster = [];
-  const others = new Map();         // 친구들 화면 위치 (부드럽게 따라가기)
+  const others = new Map();
   const imgs = {};
-  let myX = 50, myY = 35, tgtX = 50, tgtY = 35, placed = false, hitAt = 0, shieldLocal = 0, lastSent = 0, sentX = -1, sentY = -1;
+  let myX = 85, myY = 60, tgtX = 85, tgtY = 60, placed = false, hitAt = 0, shieldLocal = 0, lastSent = 0, sentX = -1, sentY = -1;
+  let camX = 0, camY = 0;
   const keys = new Set();
-  const stars = Array.from({ length: 90 }, (_, i) => ({ x: (i * 37.7) % 100, y: (i * 53.3) % 70, r: (i % 3) * 0.12 + 0.12, p: i }));
+  const stars = Array.from({ length: 260 }, (_, i) => ({ x: (i * 37.7) % 170, y: (i * 53.3) % 120, r: (i % 3) * 0.12 + 0.12, p: i }));
 
   function img(team) {
     const src = MASCOT[team];
-    if (!imgs[team] || imgs[team].src !== new URL(src, location.href).href) { const im = new Image(); im.src = src; imgs[team] = im; }
+    if (!imgs[team] || imgs[team].dataset.src !== src) { const im = new Image(); im.src = src; im.dataset.src = src; imgs[team] = im; }
     return imgs[team];
   }
   function serverNow() { return Date.now() + (isFinite(offset) ? offset : 0); }
 
-  // 드래그: 손가락이 움직인 만큼 내 우주선이 움직여요 (손가락이 캐릭터를 가리지 않게)
+  // 🕹 조이스틱 (왼쪽 아래)
+  let joyVec = { x: 0, y: 0 }, joyId = null;
+  function joyMove(e) {
+    const r = joy.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, max = r.width * 0.38;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const d = Math.hypot(dx, dy);
+    if (d > max) { dx = dx / d * max; dy = dy / d * max; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    joyVec = { x: dx / max, y: dy / max };
+  }
+  function joyEnd() { joyId = null; joyVec = { x: 0, y: 0 }; knob.style.transform = ''; joy.classList.remove('on'); }
+  // 화면 아무 데나 드래그해도 움직여요
   let drag = null;
   if (ctx) {
-    wrap.addEventListener('pointerdown', e => { e.preventDefault(); drag = { x: e.clientX, y: e.clientY }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
+    joy.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); joyId = e.pointerId; joy.classList.add('on'); joy.setPointerCapture && joy.setPointerCapture(e.pointerId); joyMove(e); });
+    joy.addEventListener('pointermove', e => { if (e.pointerId === joyId) joyMove(e); });
+    joy.addEventListener('pointerup', joyEnd); joy.addEventListener('pointercancel', joyEnd);
+    wrap.addEventListener('pointerdown', e => { e.preventDefault(); drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
     wrap.addEventListener('pointermove', e => {
-      if (!drag) return;
-      const k = W / cv.clientWidth * 1.15;
+      if (!drag || e.pointerId !== drag.id) return;
+      const k = VIEW_W / cv.clientWidth * 1.15;
       tgtX = Math.max(0, Math.min(W, tgtX + (e.clientX - drag.x) * k));
       tgtY = Math.max(0, Math.min(H, tgtY + (e.clientY - drag.y) * k));
-      drag = { x: e.clientX, y: e.clientY };
+      drag.x = e.clientX; drag.y = e.clientY;
     });
-    const end = () => { drag = null; };
+    const end = e => { if (drag && e.pointerId === drag.id) drag = null; };
     wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
-    const kd = e => {
-      if (!wrap.isConnected) return document.removeEventListener('keydown', kd);
-      if (/^(Arrow|Key[WASD])/.test(e.code)) { e.preventDefault(); keys.add(e.code); }
-    };
+    const kd = e => { if (!wrap.isConnected) return document.removeEventListener('keydown', kd); if (/^(Arrow|Key[WASD])/.test(e.code)) { e.preventDefault(); keys.add(e.code); } };
     const ku = e => { keys.delete(e.code); if (!wrap.isConnected) document.removeEventListener('keyup', ku); };
     document.addEventListener('keydown', kd); document.addEventListener('keyup', ku);
   }
 
+  function viewSize() { return ctx ? { vw: VIEW_W, vh: VIEW_H } : { vw: W, vh: H }; }
   function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1), cw = cv.clientWidth || 340;
-    const ch = cw * H / W;
-    if (cv.width !== Math.round(cw * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); cv.style.height = ch + 'px'; }
-    return cv.width / W; // 1칸당 픽셀
+    const { vw, vh } = viewSize();
+    const dpr = Math.min(2, window.devicePixelRatio || 1), cw = cv.clientWidth || 340, ch = cw * vh / vw;
+    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); cv.style.height = ch + 'px'; }
+    return cv.width / vw;
   }
 
   let lastFrame = performance.now();
@@ -504,16 +476,20 @@ function meteorGame(ctx) {
     const tau = (serverNow() - goAt) / 1000;
     const playing = lastS.phase === 'playing';
     const meDown = lastMe ? (lastMe.down || Date.now() - hitAt < 700) : false;
-
-    // 내 움직임
     if (ctx && lastMe && playing && !meDown) {
-      let kx = 0, ky = 0;
-      if (keys.has('ArrowLeft') || keys.has('KeyA')) kx--; if (keys.has('ArrowRight') || keys.has('KeyD')) kx++;
-      if (keys.has('ArrowUp') || keys.has('KeyW')) ky--; if (keys.has('ArrowDown') || keys.has('KeyS')) ky++;
-      if (kx || ky) { const d = Math.hypot(kx, ky); tgtX = Math.max(0, Math.min(W, myX + kx / d * 8)); tgtY = Math.max(0, Math.min(H, myY + ky / d * 8)); }
-      const dx = tgtX - myX, dy = tgtY - myY, d = Math.hypot(dx, dy), step = Eng ? Eng.METEOR.speed * dt : 42 * dt;
-      if (d <= step) { myX = tgtX; myY = tgtY; } else { myX += dx / d * step; myY += dy / d * step; }
-      // 맞았는지 내 화면에서 바로 확인
+      let vx = joyVec.x, vy = joyVec.y;
+      if (keys.has('ArrowLeft') || keys.has('KeyA')) vx -= 1; if (keys.has('ArrowRight') || keys.has('KeyD')) vx += 1;
+      if (keys.has('ArrowUp') || keys.has('KeyW')) vy -= 1; if (keys.has('ArrowDown') || keys.has('KeyS')) vy += 1;
+      const mag = Math.hypot(vx, vy);
+      if (mag > 0.12) {
+        const m = Math.min(1, mag);
+        myX = Math.max(0, Math.min(W, myX + vx / mag * m * SPEED * dt));
+        myY = Math.max(0, Math.min(H, myY + vy / mag * m * SPEED * dt));
+        tgtX = myX; tgtY = myY;
+      } else {
+        const dx = tgtX - myX, dy = tgtY - myY, d = Math.hypot(dx, dy), step = SPEED * dt;
+        if (d <= step) { myX = tgtX; myY = tgtY; } else { myX += dx / d * step; myY += dy / d * step; }
+      }
       if (Date.now() > shieldLocal) {
         for (const m of meteors) {
           const a = tau - m.t0;
@@ -532,21 +508,34 @@ function meteorGame(ctx) {
   requestAnimationFrame(frame);
 
   function draw(tau) {
-    const k = resize(), w = cv.width, hgt = cv.height;
-    // 우주 배경
-    const bg = g.createRadialGradient(w * 0.5, hgt * 0.4, 10, w * 0.5, hgt * 0.5, w * 0.8);
-    bg.addColorStop(0, '#22306b'); bg.addColorStop(1, '#0b1030');
-    g.fillStyle = bg; g.fillRect(0, 0, w, hgt);
+    const k = resize(), w = cv.width, hgt = cv.height, { vw, vh } = viewSize();
+    // 카메라: 내 캐릭터를 가운데에 (맵 끝에서는 멈춰요)
+    if (ctx) {
+      camX += (Math.max(0, Math.min(W - vw, myX - vw / 2)) - camX) * 0.25;
+      camY += (Math.max(0, Math.min(H - vh, myY - vh / 2)) - camY) * 0.25;
+    } else { camX = 0; camY = 0; }
+    const SX = x => (x - camX) * k, SY = y => (y - camY) * k;
+    g.fillStyle = '#070a1e'; g.fillRect(0, 0, w, hgt);
+    const bg = g.createRadialGradient(SX(W / 2), SY(H / 2), 10, SX(W / 2), SY(H / 2), W * k * 0.7);
+    bg.addColorStop(0, '#26357a'); bg.addColorStop(1, '#0b1030');
+    g.fillStyle = bg; g.fillRect(SX(0), SY(0), W * k, H * k);
     for (const st of stars) {
+      const x = SX(st.x), y = SY(st.y);
+      if (x < -5 || y < -5 || x > w + 5 || y > hgt + 5) continue;
       g.globalAlpha = 0.45 + 0.4 * Math.sin(tau * 2 + st.p);
-      g.fillStyle = '#fff'; g.beginPath(); g.arc(st.x * k, st.y * k, st.r * k, 0, 7); g.fill();
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, st.r * k, 0, 7); g.fill();
     }
     g.globalAlpha = 1;
+    // 우주 경계선
+    g.strokeStyle = 'rgba(255,225,26,.75)'; g.setLineDash([k * 2, k * 1.4]); g.lineWidth = Math.max(2, k * 0.5);
+    g.strokeRect(SX(0), SY(0), W * k, H * k); g.setLineDash([]);
     // 운석
     for (const m of meteors) {
       const a = tau - m.t0;
       if (a < 0 || a > m.life) continue;
-      const x = (m.x + m.vx * a) * k, y = (m.y + m.vy * a) * k, r = m.r * k, sp = Math.hypot(m.vx, m.vy);
+      const wx = m.x + m.vx * a, wy = m.y + m.vy * a;
+      if (wx < camX - 12 || wy < camY - 12 || wx > camX + vw + 12 || wy > camY + vh + 12) continue;
+      const x = SX(wx), y = SY(wy), r = m.r * k, sp = Math.hypot(m.vx, m.vy);
       const tx = x - (m.vx / sp) * r * 3.2, ty = y - (m.vy / sp) * r * 3.2;
       const tr = g.createLinearGradient(x, y, tx, ty);
       tr.addColorStop(0, 'rgba(255,170,60,.85)'); tr.addColorStop(1, 'rgba(255,90,30,0)');
@@ -561,19 +550,39 @@ function meteorGame(ctx) {
       g.beginPath(); g.arc(-r * 0.3, -r * 0.2, r * 0.22, 0, 7); g.arc(r * 0.3, r * 0.25, r * 0.16, 0, 7); g.fill();
       g.restore();
     }
-    // 친구들
     const css = getComputedStyle(document.documentElement);
     const col = { red: css.getPropertyValue('--red').trim() || '#ff4d4d', blue: css.getPropertyValue('--blue').trim() || '#2f7bff' };
     const names = new Map(roster.map(p => [p.id, p.name]));
     for (const [id, o] of others) {
       o.x += (o.tx - o.x) * 0.3; o.y += (o.ty - o.y) * 0.3;
       if (lastMe && id === lastMe.id) continue;
-      drawPlayer(o.x * k, o.y * k, PR * k, o.team, o.down, o.rev, o.shield, initial(names.get(id)), false, col, k);
+      drawPlayer(SX(o.x), SY(o.y), PR * k, o.team, o.down, o.rev, o.shield, initial(names.get(id)), false, col, k);
     }
     if (ctx && lastMe) {
       const meDown = lastMe.down || Date.now() - hitAt < 700;
-      drawPlayer(myX * k, myY * k, PR * k * 1.25, lastMe.team, meDown, (others.get(lastMe.id) || {}).rev || 0, Date.now() < shieldLocal, '', true, col, k);
+      drawPlayer(SX(myX), SY(myY), PR * k * 1.25, lastMe.team, meDown, (others.get(lastMe.id) || {}).rev || 0, Date.now() < shieldLocal, '', true, col, k);
+      drawMinimap(col);
     }
+  }
+
+  // 🗺 오른쪽 위 작은 지도: 전체 우주와 친구들 위치 (쓰러진 우리 팀은 ✕)
+  function drawMinimap(col) {
+    const w = cv.width, mw = w * 0.3, mh = mw * H / W, x0 = w - mw - w * 0.025, y0 = w * 0.025, s = mw / W;
+    g.save();
+    g.fillStyle = 'rgba(5,8,25,.72)'; g.fillRect(x0, y0, mw, mh);
+    g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 1.5; g.strokeRect(x0, y0, mw, mh);
+    g.strokeStyle = 'rgba(255,225,26,.9)'; g.strokeRect(x0 + camX * s, y0 + camY * s, VIEW_W * s, VIEW_H * s);
+    for (const [id, o] of others) {
+      if (lastMe && id === lastMe.id) continue;
+      const px = x0 + o.x * s, py = y0 + o.y * s;
+      if (o.down) {
+        if (lastMe && o.team === lastMe.team) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 3, py - 3); g.lineTo(px + 3, py + 3); g.moveTo(px + 3, py - 3); g.lineTo(px - 3, py + 3); g.stroke(); }
+        continue;
+      }
+      g.fillStyle = col[o.team]; g.beginPath(); g.arc(px, py, 2.4, 0, 7); g.fill();
+    }
+    if (lastMe) { g.fillStyle = '#ffe11a'; g.strokeStyle = '#000'; g.lineWidth = 1; g.beginPath(); g.arc(x0 + myX * s, y0 + myY * s, 3.6, 0, 7); g.fill(); g.stroke(); }
+    g.restore();
   }
 
   function drawPlayer(x, y, r, team, down, rev, shield, label, isMe, col, k) {
@@ -608,8 +617,8 @@ function meteorGame(ctx) {
     update(s, me, rs) {
       lastS = s; lastMe = me; roster = rs || roster;
       const M = s.meteor;
-      W = M.w; H = M.h; PR = M.pr; RR = M.reviveR; goAt = M.goAt;
-      offset = Math.max(offset, M.now - Date.now()); // 서버 시계 맞추기
+      W = M.w; H = M.h; PR = M.pr; RR = M.reviveR; goAt = M.goAt; SPEED = M.speed || SPEED;
+      offset = Math.max(offset, M.now - Date.now());
       if (M.seed !== seed && Eng) { seed = M.seed; meteors = Eng.makeMeteors(seed); }
       const seen = new Set();
       for (const [id, x, y, team, down, rev, shield] of M.pos) {
@@ -620,7 +629,11 @@ function meteorGame(ctx) {
       }
       for (const id of [...others.keys()]) if (!seen.has(id)) others.delete(id);
       if (me) {
-        if (!placed || me.down) { myX = tgtX = me.x; myY = tgtY = me.y; placed = true; }
+        if (!placed || me.down) {
+          myX = tgtX = me.x; myY = tgtY = me.y;
+          if (!placed) { camX = Math.max(0, Math.min(W - VIEW_W, myX - VIEW_W / 2)); camY = Math.max(0, Math.min(H - VIEW_H, myY - VIEW_H / 2)); }
+          placed = true;
+        }
         shieldLocal = Date.now() + (me.shield || 0);
         if (!me.down && Date.now() - hitAt > 700) hitAt = 0;
         banner.hidden = !me.down;
@@ -699,6 +712,249 @@ function rpsGame(ctx) {
         paint();
         tk.who(me.team);
         tk.say(R.state === 'pick' ? (me.pick ? `${RPS_NAME[me.pick]}를 냈어! 시간 안에는 바꿀 수 있어. 우리 팀 숫자를 보고 맞춰 봐!` : TIPS.rps) : TIPS.rps);
+      }
+    },
+  };
+}
+
+/* ⑨ 박 터트리기 — 주머니를 당겼다 놓아서(새총처럼) 흔들리는 박을 맞혀요 */
+function bakGame(ctx) {
+  const FW = ctx ? 100 : 200, FH = ctx ? 130 : 112;    // 학생: 우리 팀 박 하나 / 선생님: 두 팀 박
+  const GRAV = 160, BAG_R = 2.6, BAK_R = 10, THROW_X = 50, THROW_Y = 121;
+  const wrap = h('div', { class: 'bak-wrap' + (ctx ? ' playable' : '') });
+  const cv = h('canvas', { class: 'bak-cv', role: 'img', 'aria-label': ctx ? '박 터트리기. 화면을 아래로 당겼다 놓으면 주머니가 날아가요' : '두 팀의 박' });
+  wrap.append(cv);
+  const g = cv.getContext('2d');
+  const bars = h('div', { class: 'bak-bars' });
+  const tk = ctx ? techking(TIPS.bak) : null;
+  const t0 = performance.now();
+  let lastS = null, lastMe = null, coolUntil = 0, myPending = 0;
+  const lastHits = { red: null, blue: null };
+  const bags = [];       // 날아가는 주머니
+  const fx = [];         // 퍽! 효과·색종이
+  const shake = { red: 0, blue: 0 };
+  const burstT = { red: 0, blue: 0 };
+  const imgs = {};
+  function img(team) { const src = MASCOT[team]; if (!imgs[team] || imgs[team].dataset.src !== src) { const im = new Image(); im.src = src; im.dataset.src = src; imgs[team] = im; } return imgs[team]; }
+  function colors() { const c = getComputedStyle(document.documentElement); return { red: c.getPropertyValue('--red').trim() || '#ff4d4d', blue: c.getPropertyValue('--blue').trim() || '#2f7bff' }; }
+  // 박 위치: 좌우로 흔들려요 (팀마다 조금 다르게)
+  function bakPos(team, tau) {
+    const cx = ctx ? 50 : (team === 'red' ? 50 : 150), ph = team === 'red' ? 0 : 1.7;
+    return { x: cx + 24 * Math.sin(tau * 0.95 + ph), y: 30 + 2.2 * Math.sin(tau * 1.8 + ph) };
+  }
+  function myTeam() { return lastMe ? lastMe.team : 'red'; }
+
+  // 당겼다 놓기
+  let pull = null;
+  function toUnits(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * FW, y: (e.clientY - r.top) / r.height * FH }; }
+  if (ctx) {
+    wrap.addEventListener('pointerdown', e => { e.preventDefault(); const u = toUnits(e); pull = { sx: u.x, sy: u.y, x: u.x, y: u.y, id: e.pointerId }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
+    wrap.addEventListener('pointermove', e => { if (pull && e.pointerId === pull.id) { const u = toUnits(e); pull.x = u.x; pull.y = u.y; } });
+    const release = e => {
+      if (!pull || e.pointerId !== pull.id) return;
+      const v = launchVel(pull); pull = null;
+      if (!v || !lastS || lastS.phase !== 'playing' || (lastS.bak && lastS.bak.burst)) return;
+      const now = performance.now();
+      if (now < coolUntil) return;
+      coolUntil = now + (lastS.bak ? lastS.bak.cool : 380) + 40;
+      bags.push({ x: THROW_X, y: THROW_Y, vx: v.x, vy: v.y, rot: 0, team: myTeam(), mine: true });
+      if (navigator.vibrate) navigator.vibrate(12);
+    };
+    wrap.addEventListener('pointerup', release);
+    wrap.addEventListener('pointercancel', () => { pull = null; });
+  }
+  function launchVel(p) {
+    const dx = p.sx - p.x, dy = p.sy - p.y, d = Math.hypot(dx, dy);
+    if (d < 3) return null;
+    const k = Math.min(260, d * 5.2) / d;
+    return { x: dx * k, y: dy * k };
+  }
+
+  function spawnTeamBag(team, tau) { // 팀원·상대가 맞힌 주머니 (보여주기용)
+    const T = 0.55, x0 = (ctx ? 15 + Math.random() * 70 : (team === 'red' ? 15 : 115) + Math.random() * 70), y0 = FH - 4;
+    const tp = bakPos(team, tau + T);
+    bags.push({ x: x0, y: y0, vx: (tp.x - x0) / T, vy: (tp.y - y0 - 0.5 * GRAV * T * T) / T, rot: 0, team, mine: false, ghost: true, ttl: T });
+  }
+  function boom(team, x, y, col) {
+    shake[team] = 1;
+    fx.push({ kind: 'puck', x, y, t: 0, team });
+    for (let i = 0; i < 6; i++) fx.push({ kind: 'dust', x, y, vx: (Math.random() - 0.5) * 50, vy: (Math.random() - 0.8) * 40, t: 0, c: col });
+  }
+
+  let lastFrame = performance.now();
+  function frame(now) {
+    if (!wrap.isConnected) return;
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+    const tau = (now - t0) / 1000;
+    const col = colors();
+    // 주머니 날리기
+    for (let i = bags.length - 1; i >= 0; i--) {
+      const b = bags[i];
+      b.vy += GRAV * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += dt * 8;
+      if (b.ghost) {
+        b.ttl -= dt;
+        if (b.ttl <= 0) { const p = bakPos(b.team, tau); boom(b.team, p.x, p.y, col[b.team]); bags.splice(i, 1); }
+        continue;
+      }
+      const teams = ctx ? [myTeam()] : ['red', 'blue'];
+      let hit = false;
+      for (const tm of teams) {
+        if (burstT[tm]) continue;
+        const p = bakPos(tm, tau);
+        if (Math.hypot(b.x - p.x, b.y - p.y) < BAK_R + BAG_R) {
+          hit = true; boom(tm, b.x, b.y, col[tm]);
+          if (b.mine && ctx && lastS && lastS.phase === 'playing') { myPending++; ctx.act('hit'); if (navigator.vibrate) navigator.vibrate(25); }
+          break;
+        }
+      }
+      if (hit || b.y > FH + 10 || b.x < -10 || b.x > FW + 10) bags.splice(i, 1);
+    }
+    for (const t of ['red', 'blue']) shake[t] = Math.max(0, shake[t] - dt * 4);
+    draw(tau, dt, col);
+  }
+  requestAnimationFrame(frame);
+
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1), cw = cv.clientWidth || 340, ch = cw * FH / FW;
+    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); cv.style.height = ch + 'px'; }
+    return cv.width / FW;
+  }
+
+  function draw(tau, dt, col) {
+    const k = resize(), w = cv.width, hh = cv.height;
+    // 맑은 운동회 하늘과 운동장
+    const sky = g.createLinearGradient(0, 0, 0, hh);
+    sky.addColorStop(0, '#9fdcff'); sky.addColorStop(0.72, '#e8f7ff'); sky.addColorStop(0.72, '#f3d6a4'); sky.addColorStop(1, '#e9c48c');
+    g.fillStyle = sky; g.fillRect(0, 0, w, hh);
+    // 만국기
+    g.strokeStyle = '#555'; g.lineWidth = Math.max(1, k * 0.25);
+    g.beginPath(); g.moveTo(0, 6 * k); g.quadraticCurveTo(w / 2, 13 * k, w, 6 * k); g.stroke();
+    const flagCols = ['#ff4d4d', '#ffe11a', '#2f7bff', '#1fa85a', '#ff8a1f', '#8b5cf6'];
+    for (let i = 0; i < FW / 7; i++) {
+      const x = (i * 7 + 3) * k, t = x / w, y = (6 + 7 * 4 * t * (1 - t) * 1) * k;
+      g.fillStyle = flagCols[i % flagCols.length]; g.beginPath(); g.moveTo(x - 2.4 * k, y); g.lineTo(x + 2.4 * k, y); g.lineTo(x, y + 5 * k); g.closePath(); g.fill();
+    }
+    const teams = ctx ? [myTeam()] : ['red', 'blue'];
+    for (const tm of teams) {
+      const p = bakPos(tm, tau), sx = shake[tm] * Math.sin(tau * 60) * 1.4;
+      const gauge = lastS && lastS.bak ? lastS.bak.gauge[tm] / lastS.bak.goal : 0;
+      // 박을 매단 줄
+      g.strokeStyle = '#6b4a2a'; g.lineWidth = Math.max(1, k * 0.4);
+      g.beginPath(); g.moveTo((p.x) * k, 0); g.lineTo((p.x + sx) * k, (p.y - BAK_R) * k); g.stroke();
+      drawBak((p.x + sx) * k, p.y * k, BAK_R * k, col[tm], gauge, burstT[tm], tm);
+      if (burstT[tm]) burstT[tm] += dt;
+    }
+    // 던지는 사람 (우리 팀 캐릭터)
+    if (ctx) {
+      const im = img(myTeam());
+      if (im.complete && im.naturalWidth) g.drawImage(im, (THROW_X - 8) * k, (THROW_Y - 6) * k, 16 * k, 16 * k);
+      const ready = performance.now() >= coolUntil;
+      if (!pull) drawBag(THROW_X * k, (THROW_Y - 7) * k, col[myTeam()], 0, ready ? 1 : 0.4, k);
+      if (pull) {
+        const v = launchVel(pull);
+        // 당기는 고무줄과 예상 경로(앞부분만 보여줘요)
+        g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = Math.max(1, k * 0.35);
+        g.beginPath(); g.moveTo(THROW_X * k, (THROW_Y - 7) * k); g.lineTo((THROW_X - (pull.sx - pull.x) * 0.25) * k, (THROW_Y - 7 - (pull.sy - pull.y) * 0.25) * k); g.stroke();
+        if (v) {
+          g.fillStyle = 'rgba(0,0,0,.45)';
+          for (let i = 1; i <= 7; i++) { const t = i * 0.035; g.beginPath(); g.arc((THROW_X + v.x * t) * k, (THROW_Y - 7 + v.y * t + 0.5 * GRAV * t * t) * k, Math.max(1, k * 0.55), 0, 7); g.fill(); }
+        }
+        drawBag((THROW_X - (pull.sx - pull.x) * 0.25) * k, (THROW_Y - 7 - (pull.sy - pull.y) * 0.25) * k, col[myTeam()], 0, 1, k);
+      }
+    }
+    for (const b of bags) drawBag(b.x * k, b.y * k, col[b.team], b.rot, b.ghost ? 0.75 : 1, k);
+    // 효과
+    for (let i = fx.length - 1; i >= 0; i--) {
+      const f = fx[i]; f.t += dt;
+      if (f.kind === 'puck') {
+        g.globalAlpha = Math.max(0, 1 - f.t * 2); g.fillStyle = '#000'; g.font = `${Math.round(6 * k)}px Jua, sans-serif`; g.textAlign = 'center';
+        g.fillText('퍽!', (f.x + 9) * k, (f.y - 8 - f.t * 14) * k); g.globalAlpha = 1;
+        if (f.t > 0.5) fx.splice(i, 1);
+      } else {
+        f.vy += 90 * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+        g.globalAlpha = Math.max(0, 1 - f.t * 1.2); g.fillStyle = f.c;
+        g.save(); g.translate(f.x * k, f.y * k); g.rotate(f.t * 9 + i); g.fillRect(-k * 0.9, -k * 0.5, k * 1.8, k * (f.kind === 'confetti' ? 1 : 1.2)); g.restore();
+        g.globalAlpha = 1;
+        if (f.t > (f.kind === 'confetti' ? 2.6 : 0.8) || f.y > FH + 5) fx.splice(i, 1);
+      }
+    }
+  }
+
+  function drawBak(x, y, r, c, gauge, bt, team) {
+    g.save();
+    if (!bt) {
+      g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = Math.max(2, r * 0.09);
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = c; g.beginPath(); g.arc(x, y, r, Math.PI, 0); g.closePath(); g.fill(); // 위쪽 절반은 팀 색
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
+      g.beginPath(); g.moveTo(x - r, y); g.lineTo(x + r, y); g.stroke();
+      // 게이지가 찰수록 금이 가요
+      g.strokeStyle = '#000'; g.lineWidth = Math.max(1, r * 0.06);
+      const cracks = gauge > 0.85 ? 3 : gauge > 0.6 ? 2 : gauge > 0.3 ? 1 : 0;
+      const C = [[[-.2, -.9], [-.05, -.55], [-.25, -.3], [0, 0]], [[.6, -.7], [.35, -.35], [.5, -.1]], [[-.7, .4], [-.4, .2], [-.5, .6], [-.2, .75]]];
+      for (let i = 0; i < cracks; i++) { g.beginPath(); C[i].forEach(([a, b], j) => j ? g.lineTo(x + a * r, y + b * r) : g.moveTo(x + a * r, y + b * r)); g.stroke(); }
+      // 게이지 링
+      g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = Math.max(3, r * 0.22);
+      g.beginPath(); g.arc(x, y, r * 1.32, 0, 7); g.stroke();
+      g.strokeStyle = c; g.beginPath(); g.arc(x, y, r * 1.32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * gauge); g.stroke();
+      g.fillStyle = '#000'; g.font = `${Math.round(r * 0.55)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(`${Math.round(gauge * 100)}%`, x, y + r * 0.5);
+    } else {
+      // 쩍! 반으로 갈라지며 현수막이 내려와요
+      const a = Math.min(1, bt * 2.2) * 1.1;
+      for (const s of [-1, 1]) {
+        g.save(); g.translate(x + s * r * 0.02, y - r * 0.05); g.rotate(s * a);
+        g.fillStyle = c; g.strokeStyle = '#000'; g.lineWidth = Math.max(2, r * 0.09);
+        g.beginPath(); g.arc(0, 0, r, s < 0 ? Math.PI / 2 : -Math.PI / 2, s < 0 ? Math.PI * 1.5 : Math.PI / 2); g.closePath(); g.fill(); g.stroke();
+        g.restore();
+      }
+      const drop = Math.min(1, bt * 1.6), bw = r * 2.6, bh = r * 4.2 * drop;
+      g.fillStyle = '#fff'; g.strokeStyle = c; g.lineWidth = Math.max(2, r * 0.12);
+      g.fillRect(x - bw / 2, y, bw, bh); g.strokeRect(x - bw / 2, y, bw, bh);
+      if (drop > 0.6) {
+        g.fillStyle = '#000'; g.font = `${Math.round(r * 0.62)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        const name = MASCOT_NAME[team];
+        ['축', name.slice(0, 4), name.slice(4, 8), '승리'].filter(Boolean).forEach((t, i, arr) => g.fillText(t, x, y + bh * (i + 0.6) / (arr.length + 0.2)));
+      }
+    }
+    g.restore();
+  }
+  function drawBag(x, y, c, rot, alpha, k) {
+    g.save(); g.globalAlpha = alpha; g.translate(x, y); g.rotate(rot);
+    const s = BAG_R * k;
+    g.fillStyle = c; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, k * 0.35);
+    g.beginPath(); g.roundRect ? g.roundRect(-s, -s, s * 2, s * 2, s * 0.6) : g.rect(-s, -s, s * 2, s * 2); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.75)';
+    for (const [a, b] of [[-.4, -.4], [.4, .3], [-.3, .45], [.35, -.35]]) { g.beginPath(); g.arc(a * s, b * s, s * 0.14, 0, 7); g.fill(); }
+    g.restore();
+  }
+
+  return {
+    root: h('div', {}, bars, wrap, tk && tk.root),
+    update(s, me) {
+      lastS = s; lastMe = me;
+      const B = s.bak, tau = (performance.now() - t0) / 1000;
+      for (const tm of ['red', 'blue']) {
+        if (lastHits[tm] === null) lastHits[tm] = B.hits[tm];
+        let n = B.hits[tm] - lastHits[tm];
+        lastHits[tm] = B.hits[tm];
+        if (me && tm === me.team) { const own = Math.min(n, myPending); myPending -= own; n -= own; }
+        if (ctx && me && tm !== me.team) n = 0; // 학생 화면엔 우리 팀 박만
+        for (let i = 0; i < Math.min(n, 6); i++) setTimeout(() => spawnTeamBag(tm, (performance.now() - t0) / 1000), i * 90);
+        if (B.burst === tm && !burstT[tm] && (!ctx || (me && me.team === tm))) {
+          burstT[tm] = 0.001;
+          const col = colors(), p = bakPos(tm, tau);
+          for (let i = 0; i < 70; i++) fx.push({ kind: 'confetti', x: p.x, y: p.y, vx: (Math.random() - 0.5) * 90, vy: -Math.random() * 70, t: 0, c: ['#ffe11a', '#ff4d4d', '#2f7bff', '#1fa85a', '#fff', col[tm]][i % 6] });
+        }
+      }
+      setOnce(bars, JSON.stringify(B.gauge) + teamsStamp + (me ? me.team : ''), () => ['red', 'blue'].map(t =>
+        h('div', { class: `bak-bar t-${t}` + (me && me.team === t ? ' mine' : '') }, teamTag(t),
+          h('div', { class: 'zbar' }, h('i', { style: `width:${Math.min(100, B.gauge[t] / B.goal * 100)}%` })),
+          h('small', { text: `${Math.round(B.gauge[t] / B.goal * 100)}% · ${B.hits[t]}번 맞힘` }))));
+      if (tk && me) {
+        tk.who(me.team);
+        tk.say(B.burst ? (B.burst === me.team ? '쩍! 우리 팀 박이 터졌다! 🎉' : '아쉽다! 상대 팀 박이 먼저 터졌어.') : TIPS.bak);
       }
     },
   };

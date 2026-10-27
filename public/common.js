@@ -34,20 +34,20 @@ const EVENTS = [
   { id: 'land', name: '땅따먹기', desc: '붙어 있는 칸만 차지 · 상대 땅은 두 번 (60초)' },
   { id: 'relay', name: '이어달리기', desc: '운동장을 한 바퀴씩 이어 달리기 · 응원 보너스' },
   { id: 'zone', name: '거점 점령전', desc: '움직여서 거점 5곳 점령 · 100점 먼저 (90초)' },
-  { id: 'nunchi', name: '눈치게임', desc: '친구와 겹치지 않게 숫자 외치기 · 3라운드' },
   { id: 'flip', name: '판뒤집기', desc: '상대 색 판을 뒤집어 우리 색으로 · 더 많이 (45초)' },
+  { id: 'bak', name: '박 터트리기', desc: '주머니를 던져 흔들리는 박 맞히기 · 먼저 터뜨리기 (90초)' },
   { id: 'rps', name: '단체 가위바위보', desc: '팀원이 가장 많이 낸 손이 팀의 손 · 3판 먼저' },
-  { id: 'meteor', name: '운석 피하기', desc: '우주에서 사방으로 날아오는 운석 피하기 · 쓰러진 친구 부활 (60초)' },
+  { id: 'meteor', name: '운석 피하기', desc: '넓은 우주에서 사방으로 날아오는 운석 피하기 · 조이스틱 · 쓰러진 친구 부활 (60초)' },
 ];
 const TIPS = {
   tug: '줄을 눌러 옮겨 다닐 수 있어! 옮기면 0.8초 동안은 못 당겨. 한 줄에 우리 팀이 많을수록 세져. 5줄 중 3줄을 먼저 이기면 승리!',
   land: '노란 칸만 누를 수 있어. 상대 땅은 두 번 눌러야 뺏을 수 있지! ★ 본진은 못 뺏어.',
   relay: '운동장 한 바퀴가 한 구간이야! 내 차례엔 달리기, 기다릴 땐 응원하기로 우리 주자를 빠르게 해 줘!',
   zone: '운동장을 눌러서 이동해! 거점 안에 우리 팀이 더 많으면 점령돼. 점령한 거점마다 1초에 1점, 100점 먼저!',
-  nunchi: '1부터 차례로 외쳐! 혼자 외치면 +1, 친구와 동시에 누르면 겹쳐서 −1, 끝까지 못 외치면 꼴찌 −1!',
   flip: '상대 팀 색깔 판을 눌러 우리 색으로 뒤집어! 끝났을 때 우리 색 판이 더 많으면 승리!',
+  bak: '화면을 아래로 당겼다 놓으면 주머니가 날아가! 좌우로 흔들리는 우리 팀 박을 맞혀서 먼저 터뜨리자!',
   rps: '7초 안에 가위·바위·보 중 하나를 골라! 우리 팀에서 가장 많이 나온 손으로 승부해. 버튼 아래 숫자로 팀원들 생각을 읽어 봐!',
-  meteor: '화면을 드래그해서(컴퓨터는 방향키) 운석을 피해! 쓰러진 팀원 옆에 2초 있으면 부활시킬 수 있어. 살아남은 비율만큼 점수!',
+  meteor: '왼쪽 아래 조이스틱(컴퓨터는 방향키)으로 넓은 우주를 누비며 운석을 피해! 오른쪽 위 지도에 쓰러진 팀원(✕)이 보이면 구하러 가자. 옆에 2초 있으면 부활!',
 };
 
 function h(tag, attrs, ...kids) {
@@ -111,7 +111,7 @@ function hud() {
       blue.querySelector('b').textContent = s.scores.blue;
       const live = s.phase === 'playing' || s.phase === 'countdown';
       clock.firstChild.textContent = live ? s.timeLeft : '—';
-      clock.lastChild.textContent = live ? (s.event === 'nunchi' ? '라운드 시간' : '남은 시간') : '누적 점수';
+      clock.lastChild.textContent = live ? (s.event === 'rps' ? '고르는 시간' : '남은 시간') : '누적 점수';
     },
   };
 }
@@ -147,7 +147,7 @@ function teamColumns(roster, meId, onClick) {
       h('h3', { text: `${TEAM_KO[team]} ${list.filter(p => p.on).length}명` }),
       h('ul', {}, ...list.map(p => h('li', {
         class: (p.on ? '' : 'off') + (p.id === meId ? ' me' : ''), text: p.name,
-        ...(onClick ? { onclick: () => onClick(p), title: '눌러서 팀 바꾸기' } : {}),
+        ...(onClick ? { onclick: () => onClick(p), title: '눌러서 팀 바꾸기·내보내기' } : {}),
       }))));
   });
 }
@@ -235,4 +235,27 @@ function teamEditor(onSave) {
   }
   draw();
   return { root, reload() { draft = JSON.parse(JSON.stringify(TEAMS_CFG)); draw(); } };
+}
+
+/* ---------- 참가자 관리 메뉴 (선생님: 팀 바꾸기 · 내보내기) ---------- */
+function playerMenu(p, opts) {
+  document.querySelectorAll('.pmenu-back').forEach(x => x.remove());
+  const other = p.team === 'red' ? 'blue' : 'red';
+  const close = () => back.remove();
+  const moveBtn = h('button', { class: 'btn', type: 'button' }, teamIcon(other), `${euro(TEAM_KO[other])} 옮기기`);
+  if (!opts.canMove) { moveBtn.disabled = true; }
+  moveBtn.addEventListener('click', () => { opts.onMove(p); close(); });
+  const kickBtn = h('button', { class: 'btn danger', type: 'button', text: '내보내기' });
+  kickBtn.addEventListener('click', () => {
+    if (kickBtn.dataset.sure) { opts.onKick(p); close(); return; }
+    kickBtn.dataset.sure = '1'; kickBtn.textContent = '정말 내보낼까요? 한 번 더 누르기';
+  });
+  const box = h('div', { class: 'pmenu box', role: 'dialog', 'aria-label': `${p.name} 관리` },
+    h('div', { class: 'pmenu-head' }, teamTag(p.team), ' ', h('b', { text: p.name }), p.on === false ? h('small', { text: ' (접속 끊김)' }) : null),
+    moveBtn, opts.canMove ? null : h('p', { class: 'hint', text: '경기 중에는 팀을 바꿀 수 없어요. 경기가 끝나면 바꿀 수 있어요.' }),
+    opts.onKick ? kickBtn : null,
+    h('button', { class: 'btn small ghost', type: 'button', text: '닫기', onclick: close }));
+  const back = h('div', { class: 'pmenu-back' }, box);
+  back.addEventListener('click', e => { if (e.target === back) close(); });
+  document.body.append(back);
 }
