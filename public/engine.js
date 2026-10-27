@@ -113,7 +113,8 @@
     let idSeq = 0;
 
     const bump = () => { rosterVersion++; };
-    const all = () => [...players.values()].filter(online);
+    // 👀 관전자(spec)는 경기·인원 계산에서 빠져요
+    const all = () => [...players.values()].filter(p => online(p) && !p.spec);
     const members = team => all().filter(p => p.team === team);
     const size = team => Math.max(1, members(team).length);
     // ⚖ 인원 보정 가중치: 인원이 적은 팀일수록 1보다 커요
@@ -347,7 +348,7 @@
         if (r.finishedAt || !r.order.length) continue;
         if (r.state === 'handoff' && t - r.handoffAt > 4000) { r.state = 'run'; r.lastTapAt = t; r.lastHandoffMs = 4000; }
         const runner = players.get(runnerOf(r));
-        if (r.state === 'run' && (!runner || !online(runner) || t - r.lastTapAt > 7000)) {
+        if (r.state === 'run' && (!runner || !online(runner) || runner.spec || t - r.lastTapAt > 7000)) {
           r.skipped = runner ? runner.name : '나간 친구';
           r.idx++; r.state = 'handoff'; r.handoffAt = t;
         }
@@ -512,7 +513,7 @@
 
     /* ---------- 공통 ---------- */
     function act(p, type, d) {
-      if (game.phase !== 'playing' || !p) return false;
+      if (game.phase !== 'playing' || !p || p.spec) return false;
       d = d || {};
       const t = now();
       switch (game.event) {
@@ -627,6 +628,7 @@
 
     function meState(p) {
       if (!p) return null;
+      if (p.spec) return { id: p.id, name: p.name, team: p.team, spec: true };
       const t = now(), m = { id: p.id, name: p.name, team: p.team };
       const ev = game.event;
       if (ev === 'tug') {
@@ -652,7 +654,27 @@
       return m;
     }
 
-    function roster() { return [...players.values()].map(p => ({ id: p.id, name: p.name, team: p.team, on: online(p) })); }
+    function roster() { return [...players.values()].map(p => ({ id: p.id, name: p.name, team: p.team, on: online(p), spec: !!p.spec })); }
+
+    // 관전자 ↔ 선수 바꾸기 (경기 중에도 돼요)
+    function setSpec(id, on) {
+      const p = players.get(id);
+      if (!p || !!p.spec === !!on) return false;
+      const t = now();
+      if (on) { p.spec = true; }
+      else {
+        // 돌아올 때는 인원이 적은 팀으로 (같으면 원래 팀)
+        const r = members('red').length, b = members('blue').length;
+        if (r !== b) p.team = r < b ? 'red' : 'blue';
+        p.spec = false;
+        resetPlayer(p, t);
+        if (game.event === 'meteor' && game.meteor) { p.x = METEOR.w / 2; p.y = METEOR.h / 2; p.shieldUntil = t + METEOR.shieldMs; }
+        if (game.event === 'zone') { p.x = p.tx = p.team === 'red' ? 5 : 95; p.y = p.ty = 30; }
+        if (game.event === 'tug' && game.tug) { const k = game.tug.ropes.findIndex(r => !r.winner); p.rope = k < 0 ? 0 : k; }
+      }
+      bump();
+      return true;
+    }
 
     return {
       EVENT_NAMES, DURATION, TEAMS, TEAM_KO, ROPES, ZONE, METEOR, RPS, BAK,
@@ -676,6 +698,7 @@
         const p = players.get(id);
         if (p && game.phase !== 'playing') { p.team = p.team === 'red' ? 'blue' : 'red'; resetPlayer(p, now()); bump(); }
       },
+      setSpec,
       kick(id) { if (players.delete(id)) { bump(); return true; } return false; },
       removeOffline() { for (const p of [...players.values()]) if (!online(p)) players.delete(p.id); bump(); },
       resetScores() { scores = { red: 0, blue: 0 }; history = []; bump(); },

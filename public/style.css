@@ -469,3 +469,15 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .joy-row { flex-direction: column; align-items: flex-start; gap: 2px; }
 /* 아이템 소식은 위쪽에 (조이스틱과 안 겹치게) */
 .meteor-feed { top: 46px; bottom: auto; }
+
+/* 👀 관전자 */
+.tag.spec { background: #555b66; color: #fff; }
+.spec-col { grid-column: 1 / -1; --team: #555b66; --team-soft: #e4e6ea; }
+.spec-note { text-align: center; color: var(--muted); margin: 0 0 8px; }
+.me-right { display: flex; align-items: center; gap: 8px; }
+.big-spec { font-size: 4rem; line-height: 1.1; }
+.big-team small { display: block; color: var(--muted); }
+.me-line { gap: 8px; }
+.me-line > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-right { flex: none; }
+.me-right .btn { white-space: nowrap; font-size: .85rem; padding: .3em .7em; }

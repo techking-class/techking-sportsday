@@ -127,6 +127,12 @@ function api(route, body, res) {
     return send(res, 200, { ok: true });
   }
   if (route === '/api/teams') return send(res, 200, teams);
+  if (route === '/api/spec') { // 학생이 스스로 관전자 ↔ 선수 바꾸기
+    const p = players.get(body.id);
+    if (!p) return send(res, 404, { error: 'not joined' });
+    engine.setSpec(p.id, !!body.on); dirty = true;
+    return send(res, 200, { ok: true, spec: !!p.spec });
+  }
   if (route === '/api/info') return send(res, 200, { addresses: lanAddresses(), port: PORT });
   if (route === '/api/host') {
     if (String(body.pin) !== HOST_PIN) return send(res, 403, { error: 'PIN이 맞지 않아요.' });
@@ -137,6 +143,7 @@ function api(route, body, res) {
       case 'lobby': engine.toLobby(); break;
       case 'shuffle': engine.shuffleTeams(); break;
       case 'move': engine.moveTeam(body.id); break;
+      case 'spec': engine.setSpec(body.id, !!body.on); break;
       case 'kick': {
         // 내보내기: 그 학생 화면에 알리고 연결을 끊어요 (다시 참가는 가능)
         if (engine.kick(body.id)) {

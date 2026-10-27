@@ -70,7 +70,7 @@ function buildDash() {
         h('div', { class: 'event-pick' }, ...cards),
         h('div', { class: 'controls' }, startBtn, stopBtn, lobbyBtn),
         h('div', { class: 'box', style: 'margin-top:16px' }, count, cols,
-          h('p', { class: 'hint', text: '이름을 누르면 팀을 바꾸거나 내보낼 수 있어요.' }),
+          h('p', { class: 'hint', text: '이름을 누르면 팀 바꾸기 · 관전자로 바꾸기 · 내보내기를 할 수 있어요.' }),
           h('div', { class: 'controls' }, shuffleBtn, cleanBtn, resetBtn)),
         deco, hist),
       stage));
@@ -89,16 +89,17 @@ function onMsg(msg) {
   ui.startBtn.disabled = live;
   ui.stopBtn.disabled = !live;
   ui.shuffleBtn.disabled = live;
-  const on = roster.filter(p => p.on).length;
+  const on = roster.filter(p => p.on && !p.spec).length, specOn = roster.filter(p => p.on && p.spec).length;
   const c = s.counts;
-  ui.count.textContent = `지금 ${on}명 참가 중` + (c.red !== c.blue ? ` · ⚖ ${c.red}:${c.blue} 인원 자동 보정 중` : '');
+  ui.count.textContent = `지금 ${on}명 참가 중` + (specOn ? ` · 👀 관전 ${specOn}명` : '') + (c.red !== c.blue ? ` · ⚖ ${c.red}:${c.blue} 인원 자동 보정 중` : '');
 
-  const k = roster.map(p => p.id + p.team + p.on + p.name).join();
+  const k = roster.map(p => p.id + p.team + p.on + p.name + p.spec).join();
   if (k !== rosterKey || ui.live !== live) {
     rosterKey = k; ui.live = live;
     ui.cols.replaceChildren(...teamColumns(roster, null, p => playerMenu(p, {
       canMove: !live,
       onMove: q => cmd('move', { id: q.id }),
+      onSpec: (q, on) => cmd('spec', { id: q.id, on }),
       onKick: q => cmd('kick', { id: q.id }),
     })));
   }

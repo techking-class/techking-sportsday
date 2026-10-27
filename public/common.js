@@ -141,16 +141,21 @@ function resultView(s, myTeam) {
 }
 
 function teamColumns(roster, meId, onClick) {
-  return ['red', 'blue'].map(team => {
-    const list = roster.filter(p => p.team === team);
+  const li = p => h('li', {
+    class: (p.on ? '' : 'off') + (p.id === meId ? ' me' : ''), text: p.name,
+    ...(onClick ? { onclick: () => onClick(p), title: '눌러서 팀 바꾸기·관전자·내보내기' } : {}),
+  });
+  const cols = ['red', 'blue'].map(team => {
+    const list = roster.filter(p => p.team === team && !p.spec);
     return h('div', { class: `team-col t-${team}` },
       h('h3', { text: `${TEAM_KO[team]} ${list.filter(p => p.on).length}명` }),
-      h('ul', {}, ...list.map(p => h('li', {
-        class: (p.on ? '' : 'off') + (p.id === meId ? ' me' : ''), text: p.name,
-        ...(onClick ? { onclick: () => onClick(p), title: '눌러서 팀 바꾸기·내보내기' } : {}),
-      }))));
+      h('ul', {}, ...list.map(li)));
   });
+  const specs = roster.filter(p => p.spec);
+  if (specs.length) cols.push(h('div', { class: 'team-col spec-col' }, h('h3', { text: `👀 관전자 ${specs.filter(p => p.on).length}명` }), h('ul', {}, ...specs.map(li))));
+  return cols;
 }
+function specTag() { return h('span', { class: 'tag spec', text: '👀 관전자' }); }
 function historyItems(s) {
   return s.history.slice().reverse().map(x => h('li', { text: `${x.event}: ${x.winner === 'draw' ? '무승부' : TEAM_KO[x.winner] + ' 승'}` }));
 }
@@ -250,9 +255,12 @@ function playerMenu(p, opts) {
     if (kickBtn.dataset.sure) { opts.onKick(p); close(); return; }
     kickBtn.dataset.sure = '1'; kickBtn.textContent = '정말 내보낼까요? 한 번 더 누르기';
   });
+  const specBtn = opts.onSpec ? h('button', { class: 'btn ghost', type: 'button', text: p.spec ? '🙋 선수로 돌아오기' : '👀 관전자로 바꾸기' }) : null;
+  if (specBtn) specBtn.addEventListener('click', () => { opts.onSpec(p, !p.spec); close(); });
   const box = h('div', { class: 'pmenu box', role: 'dialog', 'aria-label': `${p.name} 관리` },
-    h('div', { class: 'pmenu-head' }, teamTag(p.team), ' ', h('b', { text: p.name }), p.on === false ? h('small', { text: ' (접속 끊김)' }) : null),
-    moveBtn, opts.canMove ? null : h('p', { class: 'hint', text: '경기 중에는 팀을 바꿀 수 없어요. 경기가 끝나면 바꿀 수 있어요.' }),
+    h('div', { class: 'pmenu-head' }, p.spec ? specTag() : teamTag(p.team), ' ', h('b', { text: p.name }), p.on === false ? h('small', { text: ' (접속 끊김)' }) : null),
+    p.spec ? null : moveBtn, p.spec || opts.canMove ? null : h('p', { class: 'hint', text: '경기 중에는 팀을 바꿀 수 없어요. 경기가 끝나면 바꿀 수 있어요.' }),
+    specBtn,
     opts.onKick ? kickBtn : null,
     h('button', { class: 'btn small ghost', type: 'button', text: '닫기', onclick: close }));
   const back = h('div', { class: 'pmenu-back' }, box);

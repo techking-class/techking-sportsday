@@ -95,18 +95,19 @@ setInterval(() => {
 let lastCount = -1;
 function render(s) {
   if (shell.stamp !== teamsStamp) buildShell(); // 팀 이름·색·이미지가 바뀌면 화면을 새로 그려요
-  setOnce(shell.meLine, me.team + me.name + s.eventName, () => [
-    h('span', {}, teamTag(me.team), ' ', me.name), h('span', { text: s.eventName || '대기실' })]);
+  setOnce(shell.meLine, me.team + me.name + s.eventName + me.spec + s.phase, () => [
+    h('span', {}, me.spec ? specTag() : teamTag(me.team), ' ', me.name),
+    h('span', { class: 'me-right' }, s.eventName || '대기실', ' ', specToggle(s))]);
   shell.top.update(s);
-  const key = s.phase === 'lobby' ? 'lobby' : s.phase === 'result' ? `result-${s.history.length}` : `game-${s.event}`;
+  const key = (s.phase === 'lobby' ? 'lobby' : s.phase === 'result' ? `result-${s.history.length}` : `game-${s.event}`) + (me.spec ? '-spec' : '');
   if (key !== mountedKey) { mountedKey = key; mount(s); }
-  if (view && view.update) view.update(s, me, roster);
+  if (view && view.update) view.update(s, me.spec && s.phase !== 'lobby' ? null : me, roster);
   const ov = shell.overlay;
   if (s.phase === 'countdown') {
     ov.hidden = false;
     if (s.countdown !== lastCount) {
       lastCount = s.countdown;
-      ov.replaceChildren(h('div', { class: 'count' }, h('img', { src: MASCOT[me.team], alt: '' }), String(s.countdown),
+      ov.replaceChildren(h('div', { class: 'count' }, h('img', { src: me.spec ? TK_SRC : MASCOT[me.team], alt: '' }), String(s.countdown),
         h('div', { class: 'count-name', text: `${s.eventName} 준비!` })));
     }
   } else { ov.hidden = true; lastCount = -1; }
@@ -115,7 +116,11 @@ function render(s) {
 function mount(s) {
   for (const k of Object.keys(pending)) pending[k] = 0;
   if (s.phase === 'lobby') view = lobby();
-  else if (s.phase === 'result') view = { root: resultView(s, me.team) };
+  else if (s.phase === 'result') view = { root: resultView(s, me.spec ? null : me.team) };
+  else if (me.spec) { // 👀 관전 중: 선생님 화면처럼 전체를 봐요
+    const v = createGameView(s.event, null);
+    view = { root: h('div', {}, h('p', { class: 'spec-note', text: '👀 관전 중이에요. 오른쪽 위 [참가하기]를 누르면 바로 선수로 들어갈 수 있어요.' }), v.root), update: (st, m, r) => v.update(st, null, r) };
+  }
   else view = createGameView(s.event, ctx);
   shell.content.replaceChildren(view.root);
 }
@@ -129,13 +134,26 @@ function lobby() {
   return {
     root: h('div', {}, big, tk.root, h('div', { class: 'box' }, cols), hist),
     update(s) {
-      setOnce(big, me.team, () => [h('img', { class: 'big-mascot', src: MASCOT[me.team], alt: MASCOT_NAME[me.team] }), h('div', {}, '나는 ', teamTag(me.team), ' 이에요')]);
+      setOnce(big, me.team + me.spec, () => me.spec
+        ? [h('div', { class: 'big-spec', text: '👀' }), h('div', {}, '나는 ', specTag(), ' 예요'), h('small', { text: '경기를 구경만 해요. 언제든 참가할 수 있어요.' })]
+        : [h('img', { class: 'big-mascot', src: MASCOT[me.team], alt: MASCOT_NAME[me.team] }), h('div', {}, '나는 ', teamTag(me.team), ' 이에요')]);
       tk.who(me.team);
-      const k = roster.map(p => p.id + p.team + p.on + p.name).join() + me.id;
+      const k = roster.map(p => p.id + p.team + p.on + p.name + p.spec).join() + me.id;
       if (k !== key) { key = k; cols.replaceChildren(...teamColumns(roster, me.id)); }
       hist.replaceChildren(...historyItems(s));
     },
   };
+}
+
+// 👀 관전자 ↔ 🙋 선수 바꾸기 버튼
+function specToggle(s) {
+  const b = h('button', { class: 'btn small ghost', type: 'button', text: me.spec ? '🙋 참가하기' : '👀 관전하기' });
+  b.addEventListener('click', () => {
+    const on = !me.spec;
+    if (on && s.phase === 'playing' && !confirm('관전자가 되면 이번 경기에서 빠져요. 관전할까요?')) return;
+    post('/api/spec', { id: myId, on }).catch(() => {});
+  });
+  return b;
 }
 
 if (myId) start(); else showJoin();
