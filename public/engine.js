@@ -33,7 +33,7 @@
   const RPS = { pickMs: 7000, revealMs: 3500, win: 3, maxRounds: 9 };
   const BEATS = { r: 's', s: 'p', p: 'r' }; // 바위>가위, 가위>보, 보>바위
   // 운석 피하기: 넓은 우주 공간 가로 170 × 세로 120 (화면은 내 주변만 보여주고 따라다녀요)
-  const METEOR = { w: 170, h: 120, pr: 2.4, speed: 48, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
+  const METEOR = { w: 170, h: 120, pr: 2.4, speed: 30, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
 
   // 모든 화면이 같은 순서·같은 시간에 같은 운석을 보도록, 같은 '씨앗(seed)'으로 운석 목록을 계산해요
   function mulberry32(a) {
@@ -49,7 +49,7 @@
     let t = 1.5;
     while (t < durSec) {
       const prog = t / durSec;
-      t += -Math.log(1 - R()) / ((0.9 + 4.6 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
+      t += -Math.log(1 - R()) / ((0.55 + 2.6 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
       const edge = Math.floor(R() * 4);
       let x, y;
       if (edge === 0) { x = R() * W; y = -m; } else if (edge === 1) { x = W + m; y = R() * H; }

@@ -411,7 +411,7 @@ function meteorGame(ctx) {
   const tk = ctx ? techking(TIPS.meteor) : null;
   const g = cv.getContext('2d');
 
-  let W = 170, H = 120, PR = 2.4, RR = 7, SPEED = 48;
+  let W = 170, H = 120, PR = 2.4, RR = 7, SPEED = 30;
   let meteors = [], seed = null, goAt = 0, offset = -Infinity, lastS = null, lastMe = null, roster = [];
   const others = new Map();
   const imgs = {};
@@ -482,7 +482,7 @@ function meteorGame(ctx) {
       if (keys.has('ArrowUp') || keys.has('KeyW')) vy -= 1; if (keys.has('ArrowDown') || keys.has('KeyS')) vy += 1;
       const mag = Math.hypot(vx, vy);
       if (mag > 0.12) {
-        const m = Math.min(1, mag);
+        const m = Math.pow(Math.min(1, mag), 1.6); // 조금만 밀면 천천히, 끝까지 밀어야 최고 속도
         myX = Math.max(0, Math.min(W, myX + vx / mag * m * SPEED * dt));
         myY = Math.max(0, Math.min(H, myY + vy / mag * m * SPEED * dt));
         tgtX = myX; tgtY = myY;
