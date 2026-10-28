@@ -1,0 +1,9 @@
+{
+  "name": "techking-sportsday",
+  "version": "1.0.0",
+  "description": "테크킹 운동회 - 학급 실시간 팀 대결 미니게임",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
