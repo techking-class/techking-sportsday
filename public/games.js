@@ -136,7 +136,7 @@ function landGame(ctx) {
   let n = 0, cellsEl = [], lastS = null;
   function build(size) {
     n = size;
-    grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+    grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`; // 칸이 많아도 화면 안에
     cellsEl = [];
     for (let i = 0; i < n * n; i++) {
       const b = h('button', { class: 'cell', type: 'button', 'aria-label': `${Math.floor(i / n) + 1}행 ${i % n + 1}열` });
@@ -353,7 +353,7 @@ function flipGame(ctx) {
   let n = 0, discs = [], lastS = null, lastMe = null, lastPick = 0;
   function build(size) {
     n = size;
-    grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+    grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
     discs = [];
     for (let i = 0; i < n * n; i++) {
       const d = h('button', { class: 'disc', type: 'button', 'aria-label': `${i + 1}번 판` }, h('span', { class: 'disc-in' }));
@@ -408,7 +408,7 @@ function meteorGame(ctx) {
   wrap.append(cv, banner, feedBox);
   if (ctx) wrap.append(joy); // 🕹 조이스틱: 경기장 안 왼쪽 아래
   const effects = h('div', { class: 'meteor-effects' });
-  const joyRow = ctx ? h('div', { class: 'joy-row' }, h('small', { text: '왼쪽 아래 조이스틱을 밀어서 움직여요 · 컴퓨터는 방향키' }), effects) : null;
+  const joyRow = ctx ? h('div', { class: 'joy-row' }, h('small', { text: '아래 가운데 조이스틱을 밀어서 움직여요 · 컴퓨터는 방향키' }), effects) : null;
   const legend = h('div', { class: 'item-legend' });
   const scoreBox = h('div', { class: 'meteor-score' });
   const tk = ctx ? techking(TIPS.meteor) : null;
@@ -491,7 +491,7 @@ function meteorGame(ctx) {
       if (keys.has('ArrowUp') || keys.has('KeyW')) vy -= 1; if (keys.has('ArrowDown') || keys.has('KeyS')) vy += 1;
       const mag = Math.hypot(vx, vy);
       if (mag > 0.12) {
-        const m = Math.pow(Math.min(1, mag), 1.6); // 조금만 밀면 천천히, 끝까지 밀어야 최고 속도
+        const m = Math.pow(Math.min(1, mag), 2.2); // 감도 낮춤: 조금 밀면 아주 천천히, 끝까지 밀어야 최고 속도
         myX = Math.max(0, Math.min(W, myX + vx / mag * m * speed * dt));
         myY = Math.max(0, Math.min(H, myY + vy / mag * m * speed * dt));
         tgtX = myX; tgtY = myY;
@@ -601,10 +601,12 @@ function meteorGame(ctx) {
       g.fillStyle = 'rgba(255,225,26,.45)'; g.beginPath(); g.arc(x, y, r * 1.7, 0, 7); g.fill();
     }
     if (down) {
-      g.strokeStyle = 'rgba(255,255,255,.35)'; g.setLineDash([k * 0.8, k * 0.8]); g.lineWidth = Math.max(1, k * 0.25);
-      g.beginPath(); g.arc(x, y, RR * k, 0, 7); g.stroke(); g.setLineDash([]);
-      g.fillStyle = '#7d8190'; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, k * 0.4);
-      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke();
+      g.strokeStyle = col[team]; g.globalAlpha = 0.7; g.setLineDash([k * 0.8, k * 0.8]); g.lineWidth = Math.max(1.5, k * 0.35);
+      g.beginPath(); g.arc(x, y, RR * k, 0, 7); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+      // 쓰러진 친구도 팀 색으로 (어두운 팀 색 + 흰 ✕)
+      g.fillStyle = col[team]; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, k * 0.4);
+      g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = 'rgba(0,0,0,.38)'; g.fill(); g.stroke();
       g.strokeStyle = '#fff'; g.lineWidth = Math.max(1.5, k * 0.45);
       g.beginPath(); g.moveTo(x - r * 0.45, y - r * 0.45); g.lineTo(x + r * 0.45, y + r * 0.45); g.moveTo(x + r * 0.45, y - r * 0.45); g.lineTo(x - r * 0.45, y + r * 0.45); g.stroke();
       if (rev > 0) { g.strokeStyle = col[team]; g.lineWidth = Math.max(2, k * 0.7); g.beginPath(); g.arc(x, y, r + k * 0.9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rev / 100); g.stroke(); }
@@ -749,67 +751,59 @@ function rpsGame(ctx) {
   };
 }
 
-/* ⑨ 박 터트리기 — 주머니를 당겼다 놓아서(새총처럼) 흔들리는 박을 맞혀요 */
+/* ⑨ 박 터트리기 — 팀마다 박 2개. 상대 팀 박도 함께 흔들려서 잘 조준해야 해요 */
 function bakGame(ctx) {
-  const FW = ctx ? 100 : 200, FH = ctx ? 130 : 112;    // 학생: 우리 팀 박 하나 / 선생님: 두 팀 박
-  const GRAV = 160, BAG_R = 2.6, BAK_R = 10, THROW_X = 50, THROW_Y = 121;
+  const FW = 100, FH = 130;
+  const GRAV = 160, BAG_R = 2.4, BAK_R = 8, THROW_X = 50, THROW_Y = 121;
   const wrap = h('div', { class: 'bak-wrap' + (ctx ? ' playable' : '') });
-  const cv = h('canvas', { class: 'bak-cv', role: 'img', 'aria-label': ctx ? '박 터트리기. 화면을 아래로 당겼다 놓으면 주머니가 날아가요' : '두 팀의 박' });
+  const cv = h('canvas', { class: 'bak-cv', role: 'img', 'aria-label': ctx ? '박 터트리기. 화면을 아래로 당겼다 놓으면 주머니가 날아가요' : '네 개의 박' });
   wrap.append(cv);
   const g = cv.getContext('2d');
   const bars = h('div', { class: 'bak-bars' });
   const tk = ctx ? techking(TIPS.bak) : null;
   const t0 = performance.now();
-  let lastS = null, lastMe = null, coolUntil = 0, myPending = 0;
-  const lastHits = { red: null, blue: null };
-  const bags = [];       // 날아가는 주머니
-  const fx = [];         // 퍽! 효과·색종이
-  const shake = { red: 0, blue: 0 };
-  const burstT = { red: 0, blue: 0 };
+  let lastS = null, lastMe = null, coolUntil = 0;
+  let spots = [{ team: 'red', x: 27, y: 24, amp: 16, ph: 0 }, { team: 'blue', x: 73, y: 24, amp: 16, ph: 1.6 }, { team: 'blue', x: 27, y: 50, amp: 18, ph: 3.1 }, { team: 'red', x: 73, y: 50, amp: 18, ph: 4.6 }];
+  let lastHits = null, myPending = [0, 0, 0, 0];
+  const bags = [], fx = [], shake = [0, 0, 0, 0], burstT = [0, 0, 0, 0];
   const imgs = {};
   function img(team) { const src = MASCOT[team]; if (!imgs[team] || imgs[team].dataset.src !== src) { const im = new Image(); im.src = src; im.dataset.src = src; imgs[team] = im; } return imgs[team]; }
   function colors() { const c = getComputedStyle(document.documentElement); return { red: c.getPropertyValue('--red').trim() || '#ff4d4d', blue: c.getPropertyValue('--blue').trim() || '#2f7bff' }; }
-  // 박 위치: 좌우로 흔들려요 (팀마다 조금 다르게)
-  function bakPos(team, tau) {
-    const cx = ctx ? 50 : (team === 'red' ? 50 : 150), ph = team === 'red' ? 0 : 1.7;
-    return { x: cx + 24 * Math.sin(tau * 0.95 + ph), y: 30 + 2.2 * Math.sin(tau * 1.8 + ph) };
-  }
+  // 박 위치: 각자 좌우로 흔들려서 서로 엇갈려요
+  function bakPos(k, tau) { const s = spots[k]; return { x: s.x + s.amp * Math.sin(tau * 0.9 + s.ph), y: s.y + 2 * Math.sin(tau * 1.7 + s.ph) }; }
   function myTeam() { return lastMe ? lastMe.team : 'red'; }
+  function bakState(k) { return lastS && lastS.bak && lastS.bak.baks[k] ? lastS.bak.baks[k] : { team: spots[k].team, g: 0, burst: false }; }
 
-  // 당겼다 놓기
   let pull = null;
   function toUnits(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * FW, y: (e.clientY - r.top) / r.height * FH }; }
-  if (ctx) {
-    wrap.addEventListener('pointerdown', e => { e.preventDefault(); const u = toUnits(e); pull = { sx: u.x, sy: u.y, x: u.x, y: u.y, id: e.pointerId }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
-    wrap.addEventListener('pointermove', e => { if (pull && e.pointerId === pull.id) { const u = toUnits(e); pull.x = u.x; pull.y = u.y; } });
-    const release = e => {
-      if (!pull || e.pointerId !== pull.id) return;
-      const v = launchVel(pull); pull = null;
-      if (!v || !lastS || lastS.phase !== 'playing' || (lastS.bak && lastS.bak.burst)) return;
-      const now = performance.now();
-      if (now < coolUntil) return;
-      coolUntil = now + (lastS.bak ? lastS.bak.cool : 380) + 40;
-      bags.push({ x: THROW_X, y: THROW_Y, vx: v.x, vy: v.y, rot: 0, team: myTeam(), mine: true });
-      if (navigator.vibrate) navigator.vibrate(12);
-    };
-    wrap.addEventListener('pointerup', release);
-    wrap.addEventListener('pointercancel', () => { pull = null; });
-  }
   function launchVel(p) {
     const dx = p.sx - p.x, dy = p.sy - p.y, d = Math.hypot(dx, dy);
     if (d < 3) return null;
     const k = Math.min(260, d * 5.2) / d;
     return { x: dx * k, y: dy * k };
   }
-
-  function spawnTeamBag(team, tau) { // 팀원·상대가 맞힌 주머니 (보여주기용)
-    const T = 0.55, x0 = (ctx ? 15 + Math.random() * 70 : (team === 'red' ? 15 : 115) + Math.random() * 70), y0 = FH - 4;
-    const tp = bakPos(team, tau + T);
-    bags.push({ x: x0, y: y0, vx: (tp.x - x0) / T, vy: (tp.y - y0 - 0.5 * GRAV * T * T) / T, rot: 0, team, mine: false, ghost: true, ttl: T });
+  if (ctx) {
+    wrap.addEventListener('pointerdown', e => { e.preventDefault(); const u = toUnits(e); pull = { sx: u.x, sy: u.y, x: u.x, y: u.y, id: e.pointerId }; wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); });
+    wrap.addEventListener('pointermove', e => { if (pull && e.pointerId === pull.id) { const u = toUnits(e); pull.x = u.x; pull.y = u.y; } });
+    wrap.addEventListener('pointerup', e => {
+      if (!pull || e.pointerId !== pull.id) return;
+      const v = launchVel(pull); pull = null;
+      if (!v || !lastS || lastS.phase !== 'playing' || (lastS.bak && lastS.bak.winner)) return;
+      const now = performance.now();
+      if (now < coolUntil) return;
+      coolUntil = now + (lastS.bak ? lastS.bak.cool : 380) + 40;
+      bags.push({ x: THROW_X, y: THROW_Y - 7, vx: v.x, vy: v.y, rot: 0, team: myTeam(), mine: true });
+      if (navigator.vibrate) navigator.vibrate(12);
+    });
+    wrap.addEventListener('pointercancel', () => { pull = null; });
   }
-  function boom(team, x, y, col) {
-    shake[team] = 1;
-    fx.push({ kind: 'puck', x, y, t: 0, team });
+  function spawnGhost(k, team, tau) { // 다른 친구들이 맞힌 주머니 (보여주기용)
+    const T = 0.55, x0 = 15 + Math.random() * 70, y0 = FH - 4, tp = bakPos(k, tau + T);
+    bags.push({ x: x0, y: y0, vx: (tp.x - x0) / T, vy: (tp.y - y0 - 0.5 * GRAV * T * T) / T, rot: 0, team, ghost: true, ttl: T, k });
+  }
+  function boom(k, x, y, col, wrong) {
+    shake[k] = 1;
+    fx.push({ kind: 'puck', x, y, t: 0, text: wrong ? '앗! 상대 박' : '퍽!' });
     for (let i = 0; i < 6; i++) fx.push({ kind: 'dust', x, y, vx: (Math.random() - 0.5) * 50, vy: (Math.random() - 0.8) * 40, t: 0, c: col });
   }
 
@@ -818,31 +812,30 @@ function bakGame(ctx) {
     if (!wrap.isConnected) return;
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
-    const tau = (now - t0) / 1000;
-    const col = colors();
-    // 주머니 날리기
+    const tau = (now - t0) / 1000, col = colors();
     for (let i = bags.length - 1; i >= 0; i--) {
       const b = bags[i];
       b.vy += GRAV * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += dt * 8;
       if (b.ghost) {
         b.ttl -= dt;
-        if (b.ttl <= 0) { const p = bakPos(b.team, tau); boom(b.team, p.x, p.y, col[b.team]); bags.splice(i, 1); }
+        if (b.ttl <= 0) { const p = bakPos(b.k, tau); boom(b.k, p.x, p.y, col[spots[b.k].team]); bags.splice(i, 1); }
         continue;
       }
-      const teams = ctx ? [myTeam()] : ['red', 'blue'];
       let hit = false;
-      for (const tm of teams) {
-        if (burstT[tm]) continue;
-        const p = bakPos(tm, tau);
+      for (let k = 0; k < spots.length; k++) {
+        if (bakState(k).burst) continue;
+        const p = bakPos(k, tau);
         if (Math.hypot(b.x - p.x, b.y - p.y) < BAK_R + BAG_R) {
-          hit = true; boom(tm, b.x, b.y, col[tm]);
-          if (b.mine && ctx && lastS && lastS.phase === 'playing') { myPending++; ctx.act('hit'); if (navigator.vibrate) navigator.vibrate(25); }
+          hit = true;
+          const wrong = spots[k].team !== b.team;
+          boom(k, b.x, b.y, col[spots[k].team], wrong);
+          if (b.mine && ctx && lastS && lastS.phase === 'playing') { myPending[k]++; ctx.act('hit', { k }); if (navigator.vibrate) navigator.vibrate(wrong ? [20, 40, 20] : 25); }
           break;
         }
       }
       if (hit || b.y > FH + 10 || b.x < -10 || b.x > FW + 10) bags.splice(i, 1);
     }
-    for (const t of ['red', 'blue']) shake[t] = Math.max(0, shake[t] - dt * 4);
+    for (let k = 0; k < 4; k++) { shake[k] = Math.max(0, shake[k] - dt * 4); if (burstT[k]) burstT[k] += dt; }
     draw(tau, dt, col);
   }
   requestAnimationFrame(frame);
@@ -855,7 +848,6 @@ function bakGame(ctx) {
 
   function draw(tau, dt, col) {
     const k = resize(), w = cv.width, hh = cv.height;
-    // 맑은 운동회 하늘과 운동장
     const sky = g.createLinearGradient(0, 0, 0, hh);
     sky.addColorStop(0, '#9fdcff'); sky.addColorStop(0.72, '#e8f7ff'); sky.addColorStop(0.72, '#f3d6a4'); sky.addColorStop(1, '#e9c48c');
     g.fillStyle = sky; g.fillRect(0, 0, w, hh);
@@ -864,90 +856,90 @@ function bakGame(ctx) {
     g.beginPath(); g.moveTo(0, 6 * k); g.quadraticCurveTo(w / 2, 13 * k, w, 6 * k); g.stroke();
     const flagCols = ['#ff4d4d', '#ffe11a', '#2f7bff', '#1fa85a', '#ff8a1f', '#8b5cf6'];
     for (let i = 0; i < FW / 7; i++) {
-      const x = (i * 7 + 3) * k, t = x / w, y = (6 + 7 * 4 * t * (1 - t) * 1) * k;
+      const x = (i * 7 + 3) * k, t = x / w, y = (6 + 28 * t * (1 - t)) * k;
       g.fillStyle = flagCols[i % flagCols.length]; g.beginPath(); g.moveTo(x - 2.4 * k, y); g.lineTo(x + 2.4 * k, y); g.lineTo(x, y + 5 * k); g.closePath(); g.fill();
     }
-    const teams = ctx ? [myTeam()] : ['red', 'blue'];
-    for (const tm of teams) {
-      const p = bakPos(tm, tau), sx = shake[tm] * Math.sin(tau * 60) * 1.4;
-      const gauge = lastS && lastS.bak ? lastS.bak.gauge[tm] / lastS.bak.goal : 0;
-      // 박을 매단 줄
-      g.strokeStyle = '#6b4a2a'; g.lineWidth = Math.max(1, k * 0.4);
-      g.beginPath(); g.moveTo((p.x) * k, 0); g.lineTo((p.x + sx) * k, (p.y - BAK_R) * k); g.stroke();
-      drawBak((p.x + sx) * k, p.y * k, BAK_R * k, col[tm], gauge, burstT[tm], tm);
-      if (burstT[tm]) burstT[tm] += dt;
-    }
-    // 던지는 사람 (우리 팀 캐릭터)
+    const mine = ctx ? myTeam() : null;
+    spots.forEach((sp, i) => {
+      const st = bakState(i), p = bakPos(i, tau), sx = shake[i] * Math.sin(tau * 60) * 1.4;
+      g.strokeStyle = '#6b4a2a'; g.lineWidth = Math.max(1, k * 0.35);
+      g.beginPath(); g.moveTo(p.x * k, 0); g.lineTo((p.x + sx) * k, (p.y - BAK_R) * k); g.stroke();
+      if (st.burst && !burstT[i]) burstT[i] = 0.001;
+      drawBak((p.x + sx) * k, p.y * k, BAK_R * k, col[sp.team], st.g / (lastS && lastS.bak ? lastS.bak.goal : 30), burstT[i], sp.team, mine && sp.team !== mine);
+    });
     if (ctx) {
       const im = img(myTeam());
       if (im.complete && im.naturalWidth) g.drawImage(im, (THROW_X - 8) * k, (THROW_Y - 6) * k, 16 * k, 16 * k);
       const ready = performance.now() >= coolUntil;
       if (!pull) drawBag(THROW_X * k, (THROW_Y - 7) * k, col[myTeam()], 0, ready ? 1 : 0.4, k);
-      if (pull) {
-        const v = launchVel(pull);
-        // 당기는 고무줄과 예상 경로(앞부분만 보여줘요)
+      else {
+        const v = launchVel(pull), hx = THROW_X - (pull.sx - pull.x) * 0.25, hy = THROW_Y - 7 - (pull.sy - pull.y) * 0.25;
         g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = Math.max(1, k * 0.35);
-        g.beginPath(); g.moveTo(THROW_X * k, (THROW_Y - 7) * k); g.lineTo((THROW_X - (pull.sx - pull.x) * 0.25) * k, (THROW_Y - 7 - (pull.sy - pull.y) * 0.25) * k); g.stroke();
+        g.beginPath(); g.moveTo(THROW_X * k, (THROW_Y - 7) * k); g.lineTo(hx * k, hy * k); g.stroke();
         if (v) {
           g.fillStyle = 'rgba(0,0,0,.45)';
           for (let i = 1; i <= 7; i++) { const t = i * 0.035; g.beginPath(); g.arc((THROW_X + v.x * t) * k, (THROW_Y - 7 + v.y * t + 0.5 * GRAV * t * t) * k, Math.max(1, k * 0.55), 0, 7); g.fill(); }
         }
-        drawBag((THROW_X - (pull.sx - pull.x) * 0.25) * k, (THROW_Y - 7 - (pull.sy - pull.y) * 0.25) * k, col[myTeam()], 0, 1, k);
+        drawBag(hx * k, hy * k, col[myTeam()], 0, 1, k);
       }
     }
     for (const b of bags) drawBag(b.x * k, b.y * k, col[b.team], b.rot, b.ghost ? 0.75 : 1, k);
-    // 효과
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i]; f.t += dt;
       if (f.kind === 'puck') {
-        g.globalAlpha = Math.max(0, 1 - f.t * 2); g.fillStyle = '#000'; g.font = `${Math.round(6 * k)}px Jua, sans-serif`; g.textAlign = 'center';
-        g.fillText('퍽!', (f.x + 9) * k, (f.y - 8 - f.t * 14) * k); g.globalAlpha = 1;
+        g.globalAlpha = Math.max(0, 1 - f.t * 2); g.fillStyle = '#000'; g.font = `${Math.round(5.5 * k)}px Jua, sans-serif`; g.textAlign = 'center';
+        g.fillText(f.text, (f.x + 8) * k, (f.y - 8 - f.t * 14) * k); g.globalAlpha = 1;
         if (f.t > 0.5) fx.splice(i, 1);
       } else {
         f.vy += 90 * dt; f.x += f.vx * dt; f.y += f.vy * dt;
-        g.globalAlpha = Math.max(0, 1 - f.t * 1.2); g.fillStyle = f.c;
-        g.save(); g.translate(f.x * k, f.y * k); g.rotate(f.t * 9 + i); g.fillRect(-k * 0.9, -k * 0.5, k * 1.8, k * (f.kind === 'confetti' ? 1 : 1.2)); g.restore();
+        g.globalAlpha = Math.max(0, 1 - f.t * (f.kind === 'confetti' ? 0.45 : 1.2)); g.fillStyle = f.c;
+        g.save(); g.translate(f.x * k, f.y * k); g.rotate(f.t * 9 + i); g.fillRect(-k * 0.9, -k * 0.5, k * 1.8, k); g.restore();
         g.globalAlpha = 1;
         if (f.t > (f.kind === 'confetti' ? 2.6 : 0.8) || f.y > FH + 5) fx.splice(i, 1);
       }
     }
   }
 
-  function drawBak(x, y, r, c, gauge, bt, team) {
+  function drawBak(x, y, r, c, gauge, bt, team, isOpp) {
     g.save();
     if (!bt) {
+      g.globalAlpha = isOpp ? 0.8 : 1;
       g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = Math.max(2, r * 0.09);
       g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
-      g.fillStyle = c; g.beginPath(); g.arc(x, y, r, Math.PI, 0); g.closePath(); g.fill(); // 위쪽 절반은 팀 색
+      g.fillStyle = c; g.beginPath(); g.arc(x, y, r, Math.PI, 0); g.closePath(); g.fill();
       g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
       g.beginPath(); g.moveTo(x - r, y); g.lineTo(x + r, y); g.stroke();
-      // 게이지가 찰수록 금이 가요
       g.strokeStyle = '#000'; g.lineWidth = Math.max(1, r * 0.06);
       const cracks = gauge > 0.85 ? 3 : gauge > 0.6 ? 2 : gauge > 0.3 ? 1 : 0;
       const C = [[[-.2, -.9], [-.05, -.55], [-.25, -.3], [0, 0]], [[.6, -.7], [.35, -.35], [.5, -.1]], [[-.7, .4], [-.4, .2], [-.5, .6], [-.2, .75]]];
       for (let i = 0; i < cracks; i++) { g.beginPath(); C[i].forEach(([a, b], j) => j ? g.lineTo(x + a * r, y + b * r) : g.moveTo(x + a * r, y + b * r)); g.stroke(); }
-      // 게이지 링
       g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = Math.max(3, r * 0.22);
       g.beginPath(); g.arc(x, y, r * 1.32, 0, 7); g.stroke();
       g.strokeStyle = c; g.beginPath(); g.arc(x, y, r * 1.32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * gauge); g.stroke();
-      g.fillStyle = '#000'; g.font = `${Math.round(r * 0.55)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(`${Math.round(gauge * 100)}%`, x, y + r * 0.5);
+      g.globalAlpha = 1;
+      // 우리 팀 박엔 ★, 상대 박엔 ✕ 표시
+      g.font = `${Math.round(r * 0.62)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = '#000'; g.fillText(`${Math.round(gauge * 100)}%`, x, y + r * 0.5);
+      if (isOpp !== null && isOpp !== undefined) {
+        g.fillStyle = isOpp ? '#fff' : '#ffe11a'; g.strokeStyle = '#000'; g.lineWidth = Math.max(1.5, r * 0.08);
+        g.beginPath(); g.arc(x + r * 0.95, y - r * 0.95, r * 0.42, 0, 7); g.fill(); g.stroke();
+        g.fillStyle = '#000'; g.font = `${Math.round(r * 0.5)}px Jua, sans-serif`;
+        g.fillText(isOpp ? '✕' : '★', x + r * 0.95, y - r * 0.93);
+      }
     } else {
-      // 쩍! 반으로 갈라지며 현수막이 내려와요
       const a = Math.min(1, bt * 2.2) * 1.1;
       for (const s of [-1, 1]) {
-        g.save(); g.translate(x + s * r * 0.02, y - r * 0.05); g.rotate(s * a);
+        g.save(); g.translate(x, y - r * 0.05); g.rotate(s * a);
         g.fillStyle = c; g.strokeStyle = '#000'; g.lineWidth = Math.max(2, r * 0.09);
         g.beginPath(); g.arc(0, 0, r, s < 0 ? Math.PI / 2 : -Math.PI / 2, s < 0 ? Math.PI * 1.5 : Math.PI / 2); g.closePath(); g.fill(); g.stroke();
         g.restore();
       }
-      const drop = Math.min(1, bt * 1.6), bw = r * 2.6, bh = r * 4.2 * drop;
+      const drop = Math.min(1, bt * 1.6), bw = r * 2.4, bh = r * 3.2 * drop;
       g.fillStyle = '#fff'; g.strokeStyle = c; g.lineWidth = Math.max(2, r * 0.12);
       g.fillRect(x - bw / 2, y, bw, bh); g.strokeRect(x - bw / 2, y, bw, bh);
       if (drop > 0.6) {
-        g.fillStyle = '#000'; g.font = `${Math.round(r * 0.62)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-        const name = MASCOT_NAME[team];
-        ['축', name.slice(0, 4), name.slice(4, 8), '승리'].filter(Boolean).forEach((t, i, arr) => g.fillText(t, x, y + bh * (i + 0.6) / (arr.length + 0.2)));
+        g.fillStyle = '#000'; g.font = `${Math.round(r * 0.7)}px Jua, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText('축!', x, y + bh * 0.35); g.fillText('펑', x, y + bh * 0.72);
       }
     }
     g.restore();
@@ -967,26 +959,29 @@ function bakGame(ctx) {
     update(s, me) {
       lastS = s; lastMe = me;
       const B = s.bak, tau = (performance.now() - t0) / 1000;
-      for (const tm of ['red', 'blue']) {
-        if (lastHits[tm] === null) lastHits[tm] = B.hits[tm];
-        let n = B.hits[tm] - lastHits[tm];
-        lastHits[tm] = B.hits[tm];
-        if (me && tm === me.team) { const own = Math.min(n, myPending); myPending -= own; n -= own; }
-        if (ctx && me && tm !== me.team) n = 0; // 학생 화면엔 우리 팀 박만
-        for (let i = 0; i < Math.min(n, 6); i++) setTimeout(() => spawnTeamBag(tm, (performance.now() - t0) / 1000), i * 90);
-        if (B.burst === tm && !burstT[tm] && (!ctx || (me && me.team === tm))) {
-          burstT[tm] = 0.001;
-          const col = colors(), p = bakPos(tm, tau);
-          for (let i = 0; i < 70; i++) fx.push({ kind: 'confetti', x: p.x, y: p.y, vx: (Math.random() - 0.5) * 90, vy: -Math.random() * 70, t: 0, c: ['#ffe11a', '#ff4d4d', '#2f7bff', '#1fa85a', '#fff', col[tm]][i % 6] });
+      if (B.spots) spots = B.spots;
+      if (!lastHits) lastHits = B.baks.map(b => b.hits);
+      const col = colors();
+      B.baks.forEach((b, k) => {
+        let n = b.hits - lastHits[k];
+        lastHits[k] = b.hits;
+        const own = Math.min(n, myPending[k]); myPending[k] -= own; n -= own;
+        for (let i = 0; i < Math.min(n, 5); i++) setTimeout(() => spawnGhost(k, b.team, (performance.now() - t0) / 1000), i * 90);
+        if (b.burst && !burstT[k]) {
+          burstT[k] = 0.001;
+          const p = bakPos(k, tau);
+          for (let i = 0; i < 45; i++) fx.push({ kind: 'confetti', x: p.x, y: p.y, vx: (Math.random() - 0.5) * 80, vy: -Math.random() * 60, t: 0, c: ['#ffe11a', '#ff4d4d', '#2f7bff', '#1fa85a', '#fff', col[b.team]][i % 6] });
         }
-      }
-      setOnce(bars, JSON.stringify(B.gauge) + teamsStamp + (me ? me.team : ''), () => ['red', 'blue'].map(t =>
-        h('div', { class: `bak-bar t-${t}` + (me && me.team === t ? ' mine' : '') }, teamTag(t),
-          h('div', { class: 'zbar' }, h('i', { style: `width:${Math.min(100, B.gauge[t] / B.goal * 100)}%` })),
-          h('small', { text: `${Math.round(B.gauge[t] / B.goal * 100)}% · ${B.hits[t]}번 맞힘` }))));
+      });
+      setOnce(bars, JSON.stringify(B.baks.map(b => [b.g, b.burst])) + teamsStamp + (me ? me.team : ''), () => ['red', 'blue'].map(t => {
+        const mineBaks = B.baks.filter(b => b.team === t);
+        return h('div', { class: `bak-bar t-${t}` + (me && me.team === t ? ' mine' : '') }, teamTag(t),
+          ...mineBaks.map(b => h('div', { class: 'zbar' + (b.burst ? ' done' : '') }, h('i', { style: `width:${Math.min(100, b.g / B.goal * 100)}%` }))),
+          h('small', { text: `박 ${mineBaks.filter(b => b.burst).length}/2 터짐 · ${B.hits[t]}번 맞힘` }));
+      }));
       if (tk && me) {
         tk.who(me.team);
-        tk.say(B.burst ? (B.burst === me.team ? '쩍! 우리 팀 박이 터졌다! 🎉' : '아쉽다! 상대 팀 박이 먼저 터졌어.') : TIPS.bak);
+        tk.say(B.winner ? (B.winner === me.team ? '쩍! 우리 팀 박 2개가 모두 터졌다! 🎉' : '아쉽다! 상대 팀이 먼저 다 터뜨렸어.') : TIPS.bak);
       }
     },
   };

@@ -481,3 +481,20 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .me-line > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me-right { flex: none; }
 .me-right .btn { white-space: nowrap; font-size: .85rem; padding: .3em .7em; }
+
+.join-url .ver { font-size: .8rem; margin-top: 4px; }
+.ver-warn { background: #fff3c4; border: 3px solid #000; border-radius: var(--wob); padding: 8px 14px; margin-bottom: 12px; }
+
+.bak-bar .zbar { margin-top: 4px; }
+.bak-bar .zbar.done i { background: repeating-linear-gradient(45deg, var(--team) 0 6px, var(--crown) 6px 12px); }
+.stage .bak-wrap { max-width: 520px; }
+
+/* 조이스틱을 경기장 아래 가운데로 */
+.meteor-wrap .joy { left: 50%; transform: translateX(-50%); }
+
+/* 15×15 칸이 휴대폰 화면에 들어가게 */
+.land-grid { gap: 2px; padding: 5px; }
+.cell { min-width: 0; border-width: 1.5px; border-radius: 3px; font-size: .6rem; }
+.flip-grid { gap: 3px; padding: 6px; }
+.disc { min-width: 0; }
+.disc-in { border-width: 2px; box-shadow: inset 0 -2px 0 rgba(0,0,0,.22); }

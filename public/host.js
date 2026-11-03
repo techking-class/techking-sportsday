@@ -26,12 +26,15 @@ function cmd(name, extra) {
 
 let addr = location.origin;
 let decoOpen = false;
+let serverVersion = null;
 async function openDash() {
   document.getElementById('login').hidden = true;
   document.getElementById('dash').hidden = false;
-  if (/localhost|127\.0\.0\.1/.test(location.hostname)) {
-    try { const info = await post('/api/info', {}); if (info.addresses[0]) addr = info.addresses[0]; } catch (e) {}
-  }
+  try {
+    const info = await post('/api/info', {});
+    serverVersion = info.version || '예전 버전';
+    if (/localhost|127\.0\.0\.1/.test(location.hostname) && info.addresses[0]) addr = info.addresses[0];
+  } catch (e) {}
   buildDash();
   connect('/events?host=' + encodeURIComponent(pin), onMsg);
 }
@@ -39,7 +42,11 @@ async function openDash() {
 function buildDash() {
   const dash = document.getElementById('dash');
   const top = hud();
-  const joinUrl = h('div', { class: 'join-url' }, h('small', { text: '학생 접속 주소' }), addr.replace(/^https?:\/\//, ''));
+  const joinUrl = h('div', { class: 'join-url' }, h('small', { text: '학생 접속 주소' }), addr.replace(/^https?:\/\//, ''),
+    h('small', { class: 'ver', text: `화면 버전 ${APP_VERSION}` }));
+  // 서버 파일과 화면 파일 버전이 다르면 알려줘요 (파일 일부만 바꿨거나 서버를 다시 안 켠 경우)
+  const verWarn = serverVersion && serverVersion !== APP_VERSION
+    ? h('div', { class: 'ver-warn' }, `⚠ 서버(${serverVersion})와 화면(${APP_VERSION}) 버전이 달라요. 새 파일을 모두 덮어쓰고 서버를 껐다 다시 켜 주세요.`) : null;
   const count = h('div', { class: 'big-team' });
 
   const cards = EVENTS.map(ev => {
@@ -64,6 +71,7 @@ function buildDash() {
   const stage = h('div', { class: 'box stage' });
 
   dash.replaceChildren(
+    verWarn,
     h('div', { class: 'host-top' }, joinUrl, h('div', { class: 'host-hud' }, top.root)),
     h('div', { class: 'host-grid' },
       h('div', {},

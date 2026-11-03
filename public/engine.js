@@ -28,12 +28,15 @@
     points: [{ x: 22, y: 15 }, { x: 78, y: 15 }, { x: 50, y: 30 }, { x: 22, y: 45 }, { x: 78, y: 45 }],
   };
   // 박 터트리기: 주머니를 던져 우리 팀 박을 맞히면 게이지가 차요. 60이 차면 박이 터져요!
-  const BAK = { goal: 60, throwCool: 380, burstShowMs: 2600 };
+  // 박은 팀마다 2개 (위치는 모두 같은 화면 기준). 박 하나당 30이 차면 터지고, 우리 팀 박 2개를 먼저 다 터뜨리면 승리!
+  const BAK = { goal: 30, throwCool: 380, burstShowMs: 2600, oppHelp: 0.5,
+    spots: [{ team: 'red', x: 27, y: 24, amp: 16, ph: 0 }, { team: 'blue', x: 73, y: 24, amp: 16, ph: 1.6 },
+            { team: 'blue', x: 27, y: 50, amp: 18, ph: 3.1 }, { team: 'red', x: 73, y: 50, amp: 18, ph: 4.6 }] };
   // 단체 가위바위보: 팀원이 가장 많이 낸 손이 팀의 손! 3판 먼저 이기면 승리
   const RPS = { pickMs: 7000, revealMs: 3500, win: 3, maxRounds: 9 };
   const BEATS = { r: 's', s: 'p', p: 'r' }; // 바위>가위, 가위>보, 보>바위
   // 운석 피하기: 우주 공간 가로 130 × 세로 130 (한 화면에 전체가 보여요)
-  const METEOR = { w: 130, h: 130, pr: 2.8, speed: 30, fast: 1.6, itemR: 3.4, tiny: 0.5, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
+  const METEOR = { w: 130, h: 130, pr: 2.8, speed: 26, fast: 1.6, itemR: 3.4, tiny: 0.5, reviveR: 7, reviveMs: 2000, shieldMs: 2000 };
 
   // 모든 화면이 같은 순서·같은 시간에 같은 운석을 보도록, 같은 '씨앗(seed)'으로 운석 목록을 계산해요
   function mulberry32(a) {
@@ -49,7 +52,7 @@
     let t = 1.5;
     while (t < durSec) {
       const prog = t / durSec;
-      t += -Math.log(1 - R()) / ((0.4 + 1.8 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
+      t += -Math.log(1 - R()) / ((0.4 + 1.1 * prog) * (W * H) / 7000); // 시간이 갈수록 많아져요 (넓이에 맞춰 개수 조절)
       const edge = Math.floor(R() * 4);
       let x, y;
       if (edge === 0) { x = R() * W; y = -m; } else if (edge === 1) { x = W + m; y = R() * H; }
@@ -58,9 +61,9 @@
       // 운석 종류: 느릿느릿 큰 바위 / 보통 / 쌩 날아오는 작은 운석
       const roll = R(), a1 = R(), a2 = R();
       let sp, r, kind;
-      if (roll < 0.18 + 0.12 * prog) { kind = 'fast'; sp = 20 + a1 * 12; r = 1.3 + a2 * 0.9; }
-      else if (roll < 0.45) { kind = 'slow'; sp = 4.5 + a1 * 4; r = 3.6 + a2 * 1.8; }
-      else { kind = 'mid'; sp = 9 + a1 * 7 + 5 * prog; r = 2 + a2 * 1.6; }
+      if (roll < 0.18 + 0.12 * prog) { kind = 'fast'; sp = 20 + a1 * 12; r = 1.1 + a2 * 0.7; }
+      else if (roll < 0.45) { kind = 'slow'; sp = 4.5 + a1 * 4; r = 2.9 + a2 * 1.4; }
+      else { kind = 'mid'; sp = 9 + a1 * 7 + 5 * prog; r = 1.6 + a2 * 1.3; }
       const d = Math.hypot(tx - x, ty - y);
       out.push({ t0: t, x, y, vx: ((tx - x) / d) * sp, vy: ((ty - y) / d) * sp, r, kind,
         life: (Math.hypot(W, H) + 2 * m) / sp, spin: R() * 4 - 2 });
@@ -146,8 +149,8 @@
     }
 
     /* ---------- 경기 시작·끝 ---------- */
-    function landSize() { const n = players.size; return n <= 12 ? 10 : n <= 24 ? 12 : 14; }
-    function flipSize() { const n = players.size; return n <= 12 ? 8 : n <= 24 ? 10 : 12; } // 8×8 ~ 12×12판
+    function landSize() { return 15; } // 15×15칸
+    function flipSize() { return 15; } // 15×15판
 
     function startEvent(ev) {
       if (!EVENT_NAMES[ev]) return false;
@@ -170,7 +173,7 @@
           const order = shuffle(members(team).map(p => p.id));
           const legs = Math.max(1, order.length);
           game.relay[team] = {
-            order, legs, legLen: clamp(Math.round(240 / legs), 15, 60), legsDone: 0, idx: 0, progress: 0,
+            order, legs, legLen: clamp(Math.round(330 / legs), 20, 80), legsDone: 0, idx: 0, progress: 0,
             state: 'run', handoffAt: goAt, lastTapAt: goAt, finishedAt: null, cheerTimes: [], lastHandoffMs: null, skipped: null,
           };
         }
@@ -187,7 +190,7 @@
         const cells = shuffle(Array.from({ length: n * n }, (_, i) => (i % 2 ? 'red' : 'blue')));
         game.flip = { n, cells, flips: Array(n * n).fill(0) };
       }
-      if (ev === 'bak') game.bak = { gauge: { red: 0, blue: 0 }, hits: { red: 0, blue: 0 }, burst: null, burstAt: 0 };
+      if (ev === 'bak') game.bak = { baks: BAK.spots.map(sp => ({ team: sp.team, g: 0, hits: 0, burst: false })), hits: { red: 0, blue: 0 }, winner: null, burstAt: 0 };
       if (ev === 'rps') {
         game.endAt = Infinity;
         game.rps = { round: 0, state: 'reveal', revealUntil: goAt, picks: {}, wins: { red: 0, blue: 0 }, log: [], roundStart: 0, roundEndAt: 0, over: false };
@@ -238,8 +241,8 @@
         const s = game.zone.score;
         finish(pick(s.red, s.blue), `시간 종료! ${R} ${s.red}점 : ${B} ${s.blue}점`);
       } else if (ev === 'bak') {
-        const gg = game.bak.gauge;
-        finish(pick(r1(gg.red), r1(gg.blue)), `시간 종료! 박 게이지 ${R} ${Math.round(gg.red / BAK.goal * 100)}% : ${B} ${Math.round(gg.blue / BAK.goal * 100)}%`);
+        const tot = bakTotals();
+        finish(pick(r1(tot.red), r1(tot.blue)), `시간 종료! 박 게이지 합계 ${R} ${Math.round(tot.red / (BAK.goal * 2) * 100)}% : ${B} ${Math.round(tot.blue / (BAK.goal * 2) * 100)}%`);
       } else if (ev === 'rps') {
         const w = game.rps.wins;
         finish(pick(w.red, w.blue), `${R} ${w.red}승 : ${B} ${w.blue}승`);
@@ -401,18 +404,23 @@
 
     /* ---------- ⑨ 박 터트리기 ---------- */
     // 주머니가 박에 맞았는지는 각자 휴대폰이 판단해서 알려줘요. 서버는 너무 빠른 연속 보고만 막아요.
-    function bakHit(p, t) {
-      const G = game.bak;
-      if (G.burst || t - p.throwAt < BAK.throwCool) return;
-      p.throwAt = t; p.bakHits++;
-      G.hits[p.team]++;
-      G.gauge[p.team] += weight(p.team); // ⚖ 인원이 적은 팀은 한 번 맞힐 때 게이지가 더 많이 차요
-      if (G.gauge[p.team] >= BAK.goal) { G.gauge[p.team] = BAK.goal; G.burst = p.team; G.burstAt = t; }
+    function bakTotals() { const s = { red: 0, blue: 0 }; for (const b of game.bak.baks) s[b.team] += b.g; return s; }
+    function bakHit(p, k, t) {
+      const G = game.bak, b = G.baks[Math.floor(Number(k))];
+      if (!b || b.burst || G.winner || t - p.throwAt < BAK.throwCool) return;
+      p.throwAt = t;
+      b.hits++;
+      if (b.team === p.team) { p.bakHits++; G.hits[p.team]++; b.g += weight(p.team); } // ⚖ 인원이 적은 팀은 한 번에 더 많이 차요
+      else b.g += BAK.oppHelp * weight(p.team); // 상대 박을 맞히면 상대 팀을 도와주게 돼요!
+      if (b.g >= BAK.goal) {
+        b.g = BAK.goal; b.burst = true;
+        if (G.baks.filter(x => x.team === b.team).every(x => x.burst)) { G.winner = b.team; G.burstAt = t; }
+      }
     }
     function tickBak(t) {
       const G = game.bak;
-      // 박이 터지는 모습을 모두가 볼 수 있게 잠깐 기다렸다가 끝내요
-      if (G.burst && t - G.burstAt >= BAK.burstShowMs) finish(G.burst, `${iga(TEAM_KO[G.burst])} 박을 먼저 터뜨렸어요!`);
+      // 마지막 박이 터지는 모습을 모두가 볼 수 있게 잠깐 기다렸다가 끝내요
+      if (G.winner && t - G.burstAt >= BAK.burstShowMs) finish(G.winner, `${iga(TEAM_KO[G.winner])} 박 2개를 먼저 모두 터뜨렸어요!`);
     }
 
     /* ---------- ⑧ 단체 가위바위보 ---------- */
@@ -527,7 +535,7 @@
         case 'zone': if (type === 'move') zoneMove(p, d.x, d.y); break;
         case 'flip': if (type === 'cell') return flipHit(p, d.i, t); break;
         case 'rps': if (type === 'pick') rpsPick(p, d.c, t); break;
-        case 'bak': if (type === 'hit') bakHit(p, t); break;
+        case 'bak': if (type === 'hit') bakHit(p, d.k, t); break;
         case 'meteor':
           if (type === 'pos') meteorPos(p, d.x, d.y, t);
           else if (type === 'hit') meteorHit(p, t);
@@ -597,7 +605,7 @@
       }
       if (ev === 'bak' && game.bak) {
         const G = game.bak;
-        s.bak = { goal: BAK.goal, gauge: { red: r1(G.gauge.red), blue: r1(G.gauge.blue) }, hits: G.hits, burst: G.burst, cool: BAK.throwCool };
+        s.bak = { goal: BAK.goal, spots: BAK.spots, baks: G.baks.map(b => ({ team: b.team, g: r1(b.g), hits: b.hits, burst: b.burst })), hits: G.hits, winner: G.winner, cool: BAK.throwCool, total: bakTotals() };
       }
       if (ev === 'rps' && game.rps) {
         const G = game.rps;

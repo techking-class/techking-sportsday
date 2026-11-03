@@ -18,6 +18,7 @@ const HOST_PIN = String(process.env.HOST_PIN || Math.floor(1000 + Math.random() 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const TICK = 100;          // 0.1초마다 판정하고 모두에게 보내요
 const MAX_PLAYERS = 60;
+const VERSION = '2026-10-29'; // public/common.js 의 APP_VERSION 과 같아야 해요
 
 const now = () => Date.now();
 const isOnline = p => p.conn > 0 || now() - p.lastSeen < 8000;
@@ -133,7 +134,7 @@ function api(route, body, res) {
     engine.setSpec(p.id, !!body.on); dirty = true;
     return send(res, 200, { ok: true, spec: !!p.spec });
   }
-  if (route === '/api/info') return send(res, 200, { addresses: lanAddresses(), port: PORT });
+  if (route === '/api/info') return send(res, 200, { addresses: lanAddresses(), port: PORT, version: VERSION });
   if (route === '/api/host') {
     if (String(body.pin) !== HOST_PIN) return send(res, 403, { error: 'PIN이 맞지 않아요.' });
     switch (body.cmd) {
@@ -217,7 +218,7 @@ server.keepAliveTimeout = 65000;
 
 server.listen(PORT, '0.0.0.0', () => {
   const addrs = lanAddresses();
-  console.log('\n  👑 테크킹 운동회 서버가 켜졌어요!\n');
+  console.log(`\n  👑 테크킹 운동회 서버가 켜졌어요! (버전 ${VERSION})\n`);
   console.log('  ▶ 학생 접속 주소 (같은 와이파이에서):');
   if (addrs.length) addrs.forEach(a => console.log('      ' + a));
   else console.log(`      http://localhost:${PORT}  (네트워크 주소를 찾지 못했어요)`);
